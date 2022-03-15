@@ -40,6 +40,7 @@ typedef struct{
     Maybe#(SpecTag) spec_tag;
     // scheduling
     RegsReady regs_ready;
+    Bit secure_access;
 } ToReservationStation#(type a) deriving(Bits, Eq, FShow);
 
 interface ReservationStation#(
@@ -67,7 +68,8 @@ endinterface
 
 typedef Bit#(TAdd#(1, TLog#(NumInstTags))) VirtualInstTime;
 
-module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
+//TODO: either use or delete the noSpec parameter
+module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool noSpec)(
     ReservationStation#(size, setRegReadyNum, a)
 ) provisos (
     NumAlias#(regsReadyPortNum, TAdd#(1, setRegReadyNum)),
@@ -89,13 +91,14 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     function Integer ready_set_port(Integer i) = i; // write regs_ready by each setRegReady ifc
     Integer ready_enq_port = valueof(setRegReadyNum); // write regs_ready
 
-    Vector#(size, Ehr#(2,Bool))                      valid      <- replicateM(mkEhr(False));
-    Vector#(size, Reg#(a))                           data       <- replicateM(mkRegU);
-    Vector#(size, Reg#(PhyRegs))                     regs       <- replicateM(mkRegU);
-    Vector#(size, Reg#(InstTag))                     tag        <- replicateM(mkRegU);
-    Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag   <- replicateM(mkRegU);
-    Vector#(size, Ehr#(2, SpecBits))                 spec_bits  <- replicateM(mkEhr(?));
-    Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready <- replicateM(mkEhr(?));
+    Vector#(size, Ehr#(2,Bool))                      valid       <- replicateM(mkEhr(False));
+    Vector#(size, Reg#(a))                           data        <- replicateM(mkRegU);
+    Vector#(size, Reg#(PhyRegs))                     regs        <- replicateM(mkRegU);
+    Vector#(size, Reg#(InstTag))                     tag         <- replicateM(mkRegU);
+    Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag    <- replicateM(mkRegU);
+    Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
+    Vector#(size, Reg#(Bool)                         secure_access <- replicateM(mkRegU);
+    Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
 
     // wrong spec conflict with enq and dispatch
     RWire#(void) wrongSpec_enq_conflict <- mkRWire;
@@ -157,7 +160,9 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     function Bool get_ready(Wire#(Bool) r);
         return r;
     endfunction
-    Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid), map(get_ready, ready_wire) );
+    Vector#(size, Bool) can_schedule = zipWith( \&&, map(\~, readVReg(secure_access)),
+                                                     zipWith( \&& , readVEhr(valid_dispatch_port, valid),
+                                                                    map(get_ready, ready_wire) ));
     
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
@@ -221,6 +226,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         spec_tag[idx] <= x.spec_tag;
         spec_bits[idx][sb_enq_port] <= x.spec_bits;
         regs_ready[idx][ready_enq_port] <= x.regs_ready;
+        secure_access[idx] <= x.secure_access;
         // conflict with wrong spec
         wrongSpec_enq_conflict.wset(?);
     endmethod

@@ -61,6 +61,8 @@ typedef struct {
     // can start. XXX For fence, this bit is set at rename stage. For mem
     // accesses like Lr/Sc/Amo/MMIO, this bit is set by mem exe pipeline.
     Bool               memAccessAtCommit;
+    // ROB should notify reservation station when it's time to dequeue (at top of ROB)
+    Bool               translateNonSpeculatively;
     // we have notified LSQ that inst is at commit
     Bool               lsqAtCommitNotified;
     // a successfully translated non-MMIO store needs ROB to notify the commit
@@ -181,6 +183,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
+
+`ifdef SECURITY
+    REG#(Bool)                                                      translateNonSpeculatively <- mkRegU;
+        
 
     // wires to get stale (EHR port 0) values of PPC
     Wire#(Addr) predPcWire <- mkBypassWire;

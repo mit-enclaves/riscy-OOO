@@ -35,6 +35,6 @@ typedef struct {
 typedef ReservationStation#(`RS_FPUMULDIV_SIZE, WrAggrPortNum, FpuMulDivRSData) ReservationStationFpuMulDiv;
 (* synthesize *)
 module mkReservationStationFpuMulDiv(ReservationStationFpuMulDiv);
-    let m <- mkReservationStation(`LAZY_RS_RF, `RS_LAZY_ENQ, valueof(FpuMulDivExeNum) > 1);
+    let m <- mkReservationStation(`LAZY_RS_RF, `RS_LAZY_ENQ, valueof(FpuMulDivExeNum) > 1, False);
     return m;
 endmodule

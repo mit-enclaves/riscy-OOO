@@ -38,6 +38,6 @@ typedef struct {
 typedef ReservationStation#(`RS_ALU_SIZE, WrAggrPortNum, AluRSData) ReservationStationAlu;
 (* synthesize *)
 module mkReservationStationAlu(ReservationStationAlu);
-    ReservationStationAlu m <- mkReservationStation(`LAZY_RS_RF, `RS_LAZY_ENQ, valueof(AluExeNum) > 1);
+    ReservationStationAlu m <- mkReservationStation(`LAZY_RS_RF, `RS_LAZY_ENQ, valueof(AluExeNum) > 1, False);
     return m;
 endmodule

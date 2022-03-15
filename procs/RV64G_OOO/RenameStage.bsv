@@ -255,6 +255,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqTag: ?,
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False,
+                                translateNonSpeculatively: False,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // we have incremented epoch
@@ -389,6 +390,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 spec_bits: spec_bits,
                 spec_tag: Invalid,
                 regs_ready: regs_ready_aggr // alu will recv bypass
+                secure_access: False,
             });
         end
 
@@ -413,6 +415,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqTag: ?,
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False,
+                                translateNonSpeculatively: False,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // system inst has incremented epoch
@@ -505,6 +508,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         // LSQ tag
         LdStQTag lsq_tag = ?;
 
+        //TODO: do CSR checking to set correct spec_access field
+        Bool is_secure_access = False;
+
         // send to MEM reservation station
         if (dInst.execFunc matches tagged Mem .mem_inst) begin
             Bool isLdQ = isLdQMemFunc(mem_inst.mem_func);
@@ -523,7 +529,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         tag: inst_tag,
                         spec_bits: spec_bits,
                         spec_tag: Invalid,
-                        regs_ready: regs_ready_aggr // mem currently recv bypass
+                        regs_ready: regs_ready_aggr, // mem currently recv bypass
+                        secure_access: is_secure_access
                     });
                 end
                 doAssert(ppc == pc + 4, "Mem next PC is not PC+4");
@@ -567,6 +574,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqTag: lsq_tag,
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False, // set by ROB in case of fence
+                                translateNonSpeculatively: is_secure_access,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: False,
@@ -761,6 +769,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             // no need for execution, directly become Executed
                             noAction;
                     endcase
+            
+                    Bool is_secure_access = False;
 
                     if (to_exec) begin
                         // find an ALU pipeline
@@ -775,7 +785,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
-                                regs_ready: regs_ready_aggr // alu will recv bypass
+                                regs_ready: regs_ready_aggr, // alu will recv bypass
+                                secure_access: False
                             });
                         end
                         else begin
@@ -795,7 +806,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
-                                regs_ready: regs_ready_aggr // fpu mul div recv bypass
+                                regs_ready: regs_ready_aggr, // fpu mul div recv bypass
+                                secure_access: False
                             });
                             doAssert(ppc == pc + 4, "FpuMulDiv next PC is not PC+4");
                             doAssert(!isValid(dInst.csr), "FpuMulDiv never explicitly read/write CSR");
@@ -807,6 +819,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         end
                     end
                     else if (to_mem) begin
+                        //TODO: do is_secure_access setting
                         if (dInst.execFunc matches tagged Mem .mem_inst) begin
                             Bool isLdQ = isLdQMemFunc(mem_inst.mem_func);
                             Maybe#(LdStQTag) lsqEnqTag = isLdQ ? lsq.enqLdTag : lsq.enqStTag;
@@ -826,7 +839,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                         tag: inst_tag,
                                         spec_bits: spec_bits,
                                         spec_tag: spec_tag,
-                                        regs_ready: regs_ready_aggr // mem currently recv bypass
+                                        regs_ready: regs_ready_aggr, // mem currently recv bypass
+                                        secure_access: is_secure_access
                                     });
                                 end
                                 doAssert(ppc == pc + 4, "Mem next PC is not PC+4");
@@ -900,6 +914,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 lsqTag: lsq_tag,
                                                 ldKilled: Invalid,
                                                 memAccessAtCommit: False, // set by ROB in case of fence
+                                                translateNonSpeculatively: is_secure_access,
                                                 lsqAtCommitNotified: False,
                                                 nonMMIOStDone: False,
                                                 epochIncremented: False,
