@@ -31,6 +31,11 @@ import Ehr::*;
 import GetPut::*;
 import Assert::*;
 
+
+function Bool f_not (Bool x);
+	 return !x;
+endfunction
+
 typedef struct{
     a data;
     PhyRegs regs;
@@ -40,7 +45,7 @@ typedef struct{
     Maybe#(SpecTag) spec_tag;
     // scheduling
     RegsReady regs_ready;
-    Bit secure_access;
+    Bool delay_translation;
 } ToReservationStation#(type a) deriving(Bits, Eq, FShow);
 
 interface ReservationStation#(
@@ -97,7 +102,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
     Vector#(size, Reg#(InstTag))                     tag         <- replicateM(mkRegU);
     Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag    <- replicateM(mkRegU);
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
-    Vector#(size, Reg#(Bool)                         secure_access <- replicateM(mkRegU);
+    Vector#(size, Reg#(Bool))                         delay_translation <- replicateM(mkRegU);
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
 
     // wrong spec conflict with enq and dispatch
@@ -160,7 +165,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
     function Bool get_ready(Wire#(Bool) r);
         return r;
     endfunction
-    Vector#(size, Bool) can_schedule = zipWith( \&&, map(\~, readVReg(secure_access)),
+    Vector#(size, Bool) no_delay = map( f_not , readVReg(delay_translation));
+    Vector#(size, Bool) can_schedule = zipWith( \&& , no_delay,
                                                      zipWith( \&& , readVEhr(valid_dispatch_port, valid),
                                                                     map(get_ready, ready_wire) ));
     
@@ -226,7 +232,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
         spec_tag[idx] <= x.spec_tag;
         spec_bits[idx][sb_enq_port] <= x.spec_bits;
         regs_ready[idx][ready_enq_port] <= x.regs_ready;
-        secure_access[idx] <= x.secure_access;
+        delay_translation[idx] <= x.delay_translation;
         // conflict with wrong spec
         wrongSpec_enq_conflict.wset(?);
     endmethod
@@ -248,7 +254,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
                 src2: True,
                 src3: True,
                 dst: True
-            }
+            },
+	    delay_translation: delay_translation[i]
         };
     endmethod
 
@@ -295,3 +302,4 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
         endmethod
     endinterface
 endmodule
+

@@ -184,8 +184,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
 
-`ifdef SECURITY
-    REG#(Bool)                                                      translateNonSpeculatively <- mkRegU;
+    Reg#(Bool)                                                      translateNonSpeculatively <- mkRegU;
         
 
     // wires to get stale (EHR port 0) values of PPC
@@ -268,6 +267,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         rob_inst_state[state_enq_port] <= x.rob_inst_state;
         epochIncremented <= x.epochIncremented;
         spec_bits[sb_enq_port] <= x.spec_bits;
+        translateNonSpeculatively <= x.translateNonSpeculatively;
 `ifdef INORDER_CORE
         // in-order core enqs to LSQ later, so don't set LSQ tag; and other
         // flags should default to false
@@ -300,6 +300,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             lsqTag: lsqTag,
             ldKilled: ldKilled[ldKill_deq_port],
             memAccessAtCommit: memAccessAtCommit[accessCom_deq_port],
+            translateNonSpeculatively: translateNonSpeculatively,
             lsqAtCommitNotified: lsqAtCommitNotified[lsqNotified_deq_port],
             nonMMIOStDone: nonMMIOStDone[nonMMIOSt_deq_port],
             epochIncremented: epochIncremented,
