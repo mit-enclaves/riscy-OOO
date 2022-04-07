@@ -350,7 +350,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         // record trap info
         Addr vaddr = ?;
-        if(x.ppc_vaddr_csrData matches tagged VAddr .va) begin
+        if(x.ppc_rsidx_vaddr_csrData matches tagged VAddr .va) begin
             vaddr = va;
         end
         commitTrap <= Valid (CommitTrap {
@@ -468,7 +468,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             // write CSR
             let csr_idx = validValue(x.csr);
             Data csr_data = ?;
-            if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
+            if(x.ppc_rsidx_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = d;
             end
             else begin
@@ -483,7 +483,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         end
 
         // redirect (Sret and Mret redirect pc is got from CSRF)
-        Addr next_pc = x.ppc_vaddr_csrData matches tagged PPC .ppc ? ppc : (x.pc + 4);
+        Addr next_pc = x.ppc_rsidx_vaddr_csrData matches tagged PPC .ppc ? ppc : (x.pc + 4);
         doAssert(next_pc == x.pc + 4, "ppc must be pc + 4");
         if(x.iType == Sret) begin
             next_pc <- csrf.sret;
@@ -545,6 +545,16 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `endif
     endrule
 
+    rule notifyRSTranslate(rob.deqPort[0].deq_data.translateNonSpeculatively && 
+                           !rob.deqPort[0].deq_data.enabledTranslation);
+        let x = rob.deqPort[0].deq_data;
+        let inst_tag = rob.deqPort[0].getDeqInstTag;
+        if(verbose) $display("[notifyLSQCommit] ", fshow(x), "; ", fshow(inst_tag));
+        inIfc.rsEnableTranslation(x.ppc_rsidx_vaddr_csrData);
+        rob.setEnabledTranslation(inst_tag);
+    endrule
+
+        
     // Lr/Sc/Amo/MMIO cannot proceed to executed until we notify LSQ that it
     // has reached the commit stage
     rule notifyLSQCommit(

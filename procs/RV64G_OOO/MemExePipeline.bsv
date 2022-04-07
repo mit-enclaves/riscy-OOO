@@ -57,6 +57,8 @@ typedef struct {
     PhyRegs regs;
     InstTag tag;
     LdStQTag ldstq_tag;
+    idxT rsIdx;
+    Bool atROBTop;
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -146,6 +148,7 @@ interface MemExeInput;
     method Addr rob_getPC(InstTag t);
     method Action rob_setExecuted_doFinishMem(InstTag t, Addr vaddr, Bool access_at_commit, Bool non_mmio_st_done);
     method Action rob_setExecuted_deqLSQ(InstTag t, Maybe#(Exception) cause, Maybe#(LdKilledBy) ld_killed);
+    method Action rob_setSecureTranslation(InstTag t);
     // MMIO
     method Bool isMMIOAddr(Addr a);
     method Action mmioReq(MMIOCRq r);
@@ -368,7 +371,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     //=======================================================
 
     rule doDispatchMem;
-        rsMem.doDispatch;
         let x = rsMem.dispatchData;
         if(verbose) $display("[doDispatchMem] ", fshow(x));
 
@@ -384,7 +386,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 imm: x.data.imm,
                 regs: x.regs,
                 tag: x.tag,
-                ldstq_tag: x.data.ldstq_tag
+                ldstq_tag: x.data.ldstq_tag,
+                rsIdx: x.idx,
+                atROBTop: x.atROBTop
             },
             spec_bits: x.spec_bits
         });
@@ -418,18 +422,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             rVal2 <- readRFBypass(src2, regsReady.src2, inIfc.rf_rd2(src2), bypassWire);
         end
 
-        // go to next stage
-        regToExeQ.enq(ToSpecFifo {
-            data: MemRegReadToExe {
-                mem_func: x.mem_func,
-                imm: x.imm,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                rVal1: rVal1,
-                rVal2: rVal2
-            },
-            spec_bits: dispToReg.spec_bits
-        });
+	Data mask = csrf_rd(CSR_mevmask);
+        Bool is_secure_walk = (rval1 & csrf_rd(CSRmevmask) == csrf_rd(CSRmevbase)) || mask == signExtend(4'hF);
+	if (is_secure_walk || x.atROBTop) begin
+     	   rsMem.doDispatch(x.rsIdx);
+     	   // go to next stage
+     	   regToExeQ.enq(ToSpecFifo {
+     	       data: MemRegReadToExe {
+     	           mem_func: x.mem_func,
+     	           imm: x.imm,
+     	           tag: x.tag,
+     	           ldstq_tag: x.ldstq_tag,
+     	           rVal1: rVal1,
+     	           rVal2: rVal2
+     	       },
+     	       spec_bits: dispToReg.spec_bits
+     	   });
+        end else begin
+            inIfc.rob_setSecureTranslation(x.tag, x.rsIdx); 
+        end
     endrule
 
     rule doExeMem;

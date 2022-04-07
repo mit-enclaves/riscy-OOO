@@ -327,6 +327,7 @@ module mkCore#(CoreId coreId)(Core);
             method rob_getPC = rob.getOrigPC[valueof(AluExeNum)].get; // last getPC port
             method rob_setExecuted_doFinishMem = rob.setExecuted_doFinishMem;
             method rob_setExecuted_deqLSQ = rob.setExecuted_deqLSQ;
+            method rob_setSecureTranslation = rob.setSecureTranslation;
             method isMMIOAddr = mmio.isMMIOAddr;
             method mmioReq = mmio.dataReq;
             method mmioRespVal = mmio.dataRespVal;
@@ -480,6 +481,7 @@ module mkCore#(CoreId coreId)(Core);
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
         method lsqSetAtCommit = lsq.setAtCommit;
+        method rsEnableTranslation = reservationStationMem.enableTranslation;
         method tlbNoPendingReq = iTlb.noPendingReq && dTlb.noPendingReq;
         method setFlushTlbs = flush_tlbs._write(True);
         method setUpdateVMInfo = update_vm_info._write(True);
