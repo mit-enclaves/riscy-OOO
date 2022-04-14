@@ -45,8 +45,6 @@ typedef struct{
     Maybe#(SpecTag) spec_tag;
     // scheduling
     RegsReady regs_ready;
-    idxT idx;
-    Bool atROBTop;
 } ToReservationStation#(type a) deriving(Bits, Eq, FShow);
 
 interface ReservationStation#(
@@ -58,7 +56,6 @@ interface ReservationStation#(
     method Action setRobEnqTime(InstTime t);
     method ToReservationStation#(a) dispatchData;
     method Action doDispatch;
-    method Action enableTranslation;
 
     interface Vector#(setRegReadyNum, Put#(Maybe#(PhyRIndx))) setRegReady;
 
@@ -76,7 +73,7 @@ endinterface
 typedef Bit#(TAdd#(1, TLog#(NumInstTags))) VirtualInstTime;
 
 //TODO: either use or delete the noSpec parameter
-module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool noSpec)(
+module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     ReservationStation#(size, setRegReadyNum, a)
 ) provisos (
     NumAlias#(regsReadyPortNum, TAdd#(1, setRegReadyNum)),
@@ -105,8 +102,6 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
     Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag    <- replicateM(mkRegU);
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
-    Vector#(size, Reg#(Bool))                        delay <- replicateM(mkReg(False));
-    Vector#(size, Reg#(Bool))                        atROBTop <- replicateM(mkReg(False));
 
     // wrong spec conflict with enq and dispatch
     RWire#(void) wrongSpec_enq_conflict <- mkRWire;
@@ -168,10 +163,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
     function Bool get_ready(Wire#(Bool) r);
         return r;
     endfunction
-    Vector#(size, Bool) no_delay = map( f_not , map( \&& , readVReg(delay), readVReg(atROBTop)));
-    Vector#(size, Bool) can_schedule = zipWith( \&& , no_delay,
-                                                     zipWith( \&& , readVEhr(valid_dispatch_port, valid),
-                                                                    map(get_ready, ready_wire) ));
+    Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid), map(get_ready, ready_wire) );
     
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
@@ -235,8 +227,6 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
         spec_tag[idx] <= x.spec_tag;
         spec_bits[idx][sb_enq_port] <= x.spec_bits;
         regs_ready[idx][ready_enq_port] <= x.regs_ready;
-        delay[idx] <= False;
-        atROBTop[idx] <= False;
         // conflict with wrong spec
         wrongSpec_enq_conflict.wset(?);
     endmethod
@@ -247,7 +237,6 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
     endmethod
 
     method ToReservationStation#(a) dispatchData if (can_schedule_index matches tagged Valid .i);
-        delay[i] <= True; // prevents same entry from being dispatched a second time until at commit of ROB
         return ToReservationStation{
             data: data[i],
             regs: regs[i],
@@ -259,20 +248,14 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid, Bool
                 src2: True,
                 src3: True,
                 dst: True
-            },
-            idx: i,
-            atROBTop: atROBTop
+            }
         };
     endmethod
 
-    method Action doDispatch(idxT i);
+    method Action doDispatch if (can_schedule_index matches tagged Valid .i);
         valid[i][valid_dispatch_port] <= False;
         // conflict with wrong spec
         wrongSpec_dispatch_conflict.wset(?);
-    endmethod
-
-    method Action enableTranslation(idxT i);
-        atROBTop[i] <= True;
     endmethod
 
     method countT approximateCount;

@@ -23,6 +23,9 @@
 
 `include "ProcConfig.bsv"
 import Vector::*;
+`ifdef SECURITY
+import Ehr::*;
+`endif
 import BuildVector::*;
 import GetPut::*;
 import ClientServer::*;
@@ -57,8 +60,6 @@ typedef struct {
     PhyRegs regs;
     InstTag tag;
     LdStQTag ldstq_tag;
-    idxT rsIdx;
-    Bool atROBTop;
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -148,7 +149,9 @@ interface MemExeInput;
     method Addr rob_getPC(InstTag t);
     method Action rob_setExecuted_doFinishMem(InstTag t, Addr vaddr, Bool access_at_commit, Bool non_mmio_st_done);
     method Action rob_setExecuted_deqLSQ(InstTag t, Maybe#(Exception) cause, Maybe#(LdKilledBy) ld_killed);
-    method Action rob_setSecureTranslation(InstTag t);
+`ifdef SECURITY
+    method InstTag rob_top_tag;
+`endif
     // MMIO
     method Bool isMMIOAddr(Addr a);
     method Action mmioReq(MMIOCRq r);
@@ -231,6 +234,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // pipeline fifos
     let dispToRegQ <- mkMemDispToRegFifo;
     let regToExeQ <- mkMemRegToExeFifo;
+`ifdef SECURITY
+    Ehr#(2, Data) vaddr <- mkEhr(?);
+`endif
 
     // wire to recv bypass
     Vector#(TMul#(2, AluExeNum), RWire#(Tuple2#(PhyRIndx, Data))) bypassWire <- replicateM(mkRWire);
@@ -371,6 +377,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     //=======================================================
 
     rule doDispatchMem;
+     	rsMem.doDispatch;
         let x = rsMem.dispatchData;
         if(verbose) $display("[doDispatchMem] ", fshow(x));
 
@@ -386,9 +393,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 imm: x.data.imm,
                 regs: x.regs,
                 tag: x.tag,
-                ldstq_tag: x.data.ldstq_tag,
-                rsIdx: x.idx,
-                atROBTop: x.atROBTop
+                ldstq_tag: x.data.ldstq_tag
             },
             spec_bits: x.spec_bits
         });
@@ -401,7 +406,29 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     endrule
 
-    rule doRegReadMem;
+`ifdef SECURITY
+    rule get_addr_enclave_check;
+        let dispToReg = dispToRegQ.first;
+        let x = dispToReg.data;
+
+        let regsReady = inIfc.sbCons_lazyLookup(x.regs);
+
+        Data rVal1 = ?;
+        if(x.regs.src1 matches tagged Valid .src1) begin
+            rVal1 <- readRFBypass(src1, regsReady.src1, inIfc.rf_rd1(src1), bypassWire);
+        end
+        vaddr[0] <= rVal1;
+    endrule
+
+    function Bool should_begin_translation;
+        Bool is_trusted_walk = (vaddr[1] & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase);
+	return is_trusted_walk || (inIfc.rob_top_tag == dispToRegQ.first.data.tag);
+    endfunction
+    
+`else
+    function Bool should_begin_translation = True;
+`endif
+    rule doRegReadMem if (should_begin_translation);
         dispToRegQ.deq;
         let dispToReg = dispToRegQ.first;
         let x = dispToReg.data;
@@ -422,25 +449,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             rVal2 <- readRFBypass(src2, regsReady.src2, inIfc.rf_rd2(src2), bypassWire);
         end
 
-	Data mask = csrf_rd(CSR_mevmask);
-        Bool is_secure_walk = (rval1 & csrf_rd(CSRmevmask) == csrf_rd(CSRmevbase)) || mask == signExtend(4'hF);
-	if (is_secure_walk || x.atROBTop) begin
-     	   rsMem.doDispatch(x.rsIdx);
-     	   // go to next stage
-     	   regToExeQ.enq(ToSpecFifo {
-     	       data: MemRegReadToExe {
-     	           mem_func: x.mem_func,
-     	           imm: x.imm,
-     	           tag: x.tag,
-     	           ldstq_tag: x.ldstq_tag,
-     	           rVal1: rVal1,
-     	           rVal2: rVal2
-     	       },
-     	       spec_bits: dispToReg.spec_bits
-     	   });
-        end else begin
-            inIfc.rob_setSecureTranslation(x.tag, x.rsIdx); 
-        end
+        // go to next stage
+        regToExeQ.enq(ToSpecFifo {
+            data: MemRegReadToExe {
+  	           mem_func: x.mem_func,
+  	           imm: x.imm,
+  	           tag: x.tag,
+  	           ldstq_tag: x.ldstq_tag,
+  	           rVal1: rVal1,
+  	           rVal2: rVal2
+  	       },
+  	       spec_bits: dispToReg.spec_bits
+        });
     endrule
 
     rule doExeMem;

@@ -42,8 +42,7 @@ typedef union tagged {
     Addr PPC; // at default store ppc
     Addr VAddr; // for mem inst, store vaddr
     Data CSRData; // for Csr inst, store csr_data
-    idxT RSIdx;
-} PPCRSIdxVAddrCSRData deriving(Bits, Eq, FShow);
+} PPCVAddrCSRData deriving(Bits, Eq, FShow);
 
 typedef struct {
     Addr               pc;
@@ -51,7 +50,7 @@ typedef struct {
     Maybe#(CSR)        csr;
     Bool               claimed_phy_reg; // whether we need to commmit renaming
     Maybe#(Trap)       trap;
-    PPCRSIdxVAddrCSRData    ppc_rsidx_vaddr_csrData;
+    PPCVAddrCSRData    ppc_vaddr_csrData;
     Bit#(5)            fflags;
     Bool               will_dirty_fpu_state; // True means 2'b11 will be written to FS
     RobInstState       rob_inst_state; // was executed (i.e. can commit)
@@ -64,9 +63,6 @@ typedef struct {
     Bool               memAccessAtCommit;
     // we have notified LSQ that inst is at commit
     Bool               lsqAtCommitNotified;
-   
-    Bool               translateNonSpeculatively;
-    Bool               enabledTranslation;
     // a successfully translated non-MMIO store needs ROB to notify the commit
     // from ROB, so that it can be dequeud from SQ
     Bool               nonMMIOStDone;
@@ -107,8 +103,6 @@ interface ReorderBufferRowEhr#(numeric type aluExeNum, numeric type fpuMulDivExe
     // perform), and non-MMIO St can become Executed (NOTE faulting
     // instructions are not Executed, they are set at deqLSQ time)
     method Action setExecuted_doFinishMem(Addr vaddr, Bool access_at_commit, Bool non_mmio_st_done);
-    method Action setSecureTranslation(idxT i);
-    method Action setEnabledTranslation;
 `ifdef INORDER_CORE
     // in-order core sets LSQ tag after getting out of issue queue
     method Action setLSQTag(LdStQTag t, Bool isFence);
@@ -130,9 +124,9 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer trap_enq_port = 2; // write trap
 
     Integer pvc_deq_port = 0;
-    function Integer pvc_finishAlu_port(Integer i) = i; // write ppc_rsidx_vaddr_csrData
-    Integer pvc_finishMem_port = valueof(aluExeNum); // write ppc_rsidx_vaddr_csrData
-    Integer pvc_enq_port = 1 + valueof(aluExeNum); // write ppc_rsidx_vaddr_csrData
+    function Integer pvc_finishAlu_port(Integer i) = i; // write ppc_vaddr_csrData
+    Integer pvc_finishMem_port = valueof(aluExeNum); // write ppc_vaddr_csrData
+    Integer pvc_enq_port = 1 + valueof(aluExeNum); // write ppc_vaddr_csrData
 
     Integer fflags_deq_port = 0;
     function Integer fflags_finishFpuMulDiv_port(Integer i) = i; // write fflags
@@ -176,7 +170,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Reg#(Maybe#(CSR))                                               csr                  <- mkRegU;
     Reg#(Bool)                                                      claimed_phy_reg      <- mkRegU;
     Ehr#(3, Maybe#(Trap))                                           trap                 <- mkEhr(?);
-    Ehr#(TAdd#(2, aluExeNum), PPCRSIdxVAddrCSRData)                 ppc_rsidx_vaddr_csrData    <- mkEhr(?);
+    Ehr#(TAdd#(2, aluExeNum), PPCVAddrCSRData)                      ppc_vaddr_csrData    <- mkEhr(?);
     Ehr#(TAdd#(1, fpuMulDivExeNum), Bit#(5))                        fflags               <- mkEhr(?);
     Reg#(Bool)                                                      will_dirty_fpu_state <- mkRegU;
     Ehr#(TAdd#(3, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkEhr(?);
@@ -188,15 +182,11 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
 
-    Reg#(Bool)                                                      translateNonSpeculatively <- mkRegU;
-    Reg#(Bool)                                                      enabledTranslation <- mkRegU;
-        
-
     // wires to get stale (EHR port 0) values of PPC
     Wire#(Addr) predPcWire <- mkBypassWire;
     (* fire_when_enabled, no_implicit_conditions *)
     rule setPcWires;
-        predPcWire <= ppc_rsidx_vaddr_csrData[0] matches tagged PPC .a ? a : 0;
+        predPcWire <= ppc_vaddr_csrData[0] matches tagged PPC .a ? a : 0;
     endrule
 
     Vector#(aluExeNum, Row_setExecuted_doFinishAlu) aluSetExe;
@@ -207,10 +197,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
                 rob_inst_state[state_finishAlu_port(i)] <= Executed; 
                 // update PPC or csrData (vaddr is always useless for ALU results)
                 if(csrData matches tagged Valid .d) begin
-                    ppc_rsidx_vaddr_csrData[pvc_finishAlu_port(i)] <= CSRData (d);
+                    ppc_vaddr_csrData[pvc_finishAlu_port(i)] <= CSRData (d);
                 end
                 else begin
-                    ppc_rsidx_vaddr_csrData[pvc_finishAlu_port(i)] <= PPC (cf.nextPc);
+                    ppc_vaddr_csrData[pvc_finishAlu_port(i)] <= PPC (cf.nextPc);
                 end
                 doAssert(isValid(csr) == isValid(csrData), "csr valid should match");
             endmethod
@@ -245,19 +235,11 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             doAssert(iType == St, "must be St");
         end
         // update VAddr
-        ppc_rsidx_vaddr_csrData[pvc_finishMem_port] <= VAddr (vaddr);
+        ppc_vaddr_csrData[pvc_finishMem_port] <= VAddr (vaddr);
         // update access at commit
         memAccessAtCommit[accessCom_finishMem_port] <= access_at_commit;
         // udpate non mmio st
         nonMMIOStDone[nonMMIOSt_finishMem_port] <= non_mmio_st_done;
-    endmethod
-    method Action setSecureTranslation(i);
-        translateNonSpeculatively <= True;
-        ppc_rsidx_vaddr_csrData <= idxT (i);
-    endmethod
-
-    method Action setEnabledTranslation;
-        enabledTranslation <= True;
     endmethod
 
 `ifdef INORDER_CORE
@@ -274,14 +256,12 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         csr <= x.csr;
         claimed_phy_reg <= x.claimed_phy_reg;
         trap[trap_enq_port] <= x.trap;
-        ppc_rsidx_vaddr_csrData[pvc_enq_port] <= x.ppc_rsidx_vaddr_csrData;
+        ppc_vaddr_csrData[pvc_enq_port] <= x.ppc_vaddr_csrData;
         fflags[fflags_enq_port] <= x.fflags;
         will_dirty_fpu_state <= x.will_dirty_fpu_state;
         rob_inst_state[state_enq_port] <= x.rob_inst_state;
         epochIncremented <= x.epochIncremented;
         spec_bits[sb_enq_port] <= x.spec_bits;
-        translateNonSpeculatively <= False;
-        enabledTranslation <= False;
 `ifdef INORDER_CORE
         // in-order core enqs to LSQ later, so don't set LSQ tag; and other
         // flags should default to false
@@ -307,7 +287,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             csr: csr,
             claimed_phy_reg: claimed_phy_reg,
             trap: trap[trap_deq_port],
-            ppc_rsidx_vaddr_csrData: ppc_rsidx_vaddr_csrData[pvc_deq_port],
+            ppc_vaddr_csrData: ppc_vaddr_csrData[pvc_deq_port],
             fflags: fflags[fflags_deq_port],
             will_dirty_fpu_state: will_dirty_fpu_state,
             rob_inst_state: rob_inst_state[state_deq_port],
@@ -315,8 +295,6 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             ldKilled: ldKilled[ldKill_deq_port],
             memAccessAtCommit: memAccessAtCommit[accessCom_deq_port],
             lsqAtCommitNotified: lsqAtCommitNotified[lsqNotified_deq_port],
-            translateNonSpeculatively: translateNonSpeculatively,
-            enabledTranslation: enabledTranslation,
             nonMMIOStDone: nonMMIOStDone[nonMMIOSt_deq_port],
             epochIncremented: epochIncremented,
             spec_bits: spec_bits[sb_deq_port]
@@ -420,9 +398,6 @@ interface SupReorderBuffer#(numeric type aluExeNum, numeric type fpuMulDivExeNum
     interface Vector#(fpuMulDivExeNum, ROB_setExecuted_doFinishFpuMulDiv) setExecuted_doFinishFpuMulDiv;
     // doFinishMem, after addr translation
     method Action setExecuted_doFinishMem(InstTag x, Addr vaddr, Bool access_at_commit, Bool non_mmio_st_done);
-    //Sets flag to notify RS once inst reaches top of ROB
-    method Action rob.setSecureTranslation(InstTag x, idxT idx);
-    method Action rob.setEnabledTranslation(InstTag x);
 `ifdef INORDER_CORE
     // in-order core sets LSQ tag after getting out of issue queue
     method Action setLSQTag(InstTag x, LdStQTag t, Bool isFence);
@@ -829,7 +804,6 @@ module mkSupReorderBuffer#(
         joinActions(map(setCanEnq, idxVec));
     endrule
 
-
     Vector#(SupSize, ROB_EnqPort) enqIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         SupWaySel way = getEnqFifoWay(fromInteger(i)); // FIFO[way] is used by enq port i
@@ -979,14 +953,6 @@ module mkSupReorderBuffer#(
         all(id, readVReg(setExeMem_SB_enq)) // ordering: < enq
     );
         row[x.way][x.ptr].setExecuted_doFinishMem(vaddr, access_at_commit, non_mmio_st_done);
-    endmethod
-    
-    method Action setSecureTranslation(InstTag x, idxT i); 
-        row[x.way][x.ptr].setSecureTranslation(i);
-    endmethod
-
-    method Action setEnabledTranslation(InstTag x);
-        row[x.way][x.ptr].setEnabledTranslation();
     endmethod
 
 `ifdef INORDER_CORE

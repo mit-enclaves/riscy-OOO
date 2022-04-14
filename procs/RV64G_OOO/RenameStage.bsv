@@ -247,7 +247,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 claimed_phy_reg: False, // no renaming is done
                                 trap: firstTrap,
                                 // default values of FullResult
-                                ppc_rsidx_vaddr_csrData: PPC (ppc), // default use PPC
+                                ppc_vaddr_csrData: PPC (ppc), // default use PPC
                                 fflags: 0,
                                 ////////
                                 will_dirty_fpu_state: False,
@@ -255,8 +255,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqTag: ?,
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False,
-                                translateNonSpeculatively: False,
-                                enabledTranslation: False,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // we have incremented epoch
@@ -391,8 +389,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 spec_bits: spec_bits,
                 spec_tag: Invalid,
                 regs_ready: regs_ready_aggr // alu will recv bypass
-                idx: ?,
-                atROBTop: ?
             });
         end
 
@@ -409,7 +405,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                 trap: Invalid, // no trap
                                 // default values of FullResult
-                                ppc_rsidx_vaddr_csrData: PPC (ppc), // default use PPC
+                                ppc_vaddr_csrData: PPC (ppc), // default use PPC
                                 fflags: 0,
                                 ////////
                                 will_dirty_fpu_state: will_dirty_fpu_state,
@@ -417,8 +413,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqTag: ?,
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False,
-                                translateNonSpeculatively: False,
-                                enabledTranslation: False,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // system inst has incremented epoch
@@ -511,7 +505,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         // LSQ tag
         LdStQTag lsq_tag = ?;
 
-
         // send to MEM reservation station
         if (dInst.execFunc matches tagged Mem .mem_inst) begin
             Bool isLdQ = isLdQMemFunc(mem_inst.mem_func);
@@ -530,9 +523,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         tag: inst_tag,
                         spec_bits: spec_bits,
                         spec_tag: Invalid,
-                        regs_ready: regs_ready_aggr, // mem currently recv bypass
-                        idx: ?,
-                        atROBTop: ?
+                        regs_ready: regs_ready_aggr // mem currently recv bypass
                     });
                 end
                 doAssert(ppc == pc + 4, "Mem next PC is not PC+4");
@@ -568,7 +559,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                 trap: Invalid, // no trap
                                 // default values of FullResult
-                                ppc_rsidx_vaddr_csrData: PPC (ppc), // default use PPC
+                                ppc_vaddr_csrData: PPC (ppc), // default use PPC
                                 fflags: 0,
                                 ////////
                                 will_dirty_fpu_state: will_dirty_fpu_state,
@@ -577,8 +568,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 ldKilled: Invalid,
                                 memAccessAtCommit: False, // set by ROB in case of fence
                                 lsqAtCommitNotified: False,
-                                translateNonSpeculatively: False,
-                                enabledTranslation: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: False,
                                 spec_bits: spec_bits
@@ -772,7 +761,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             // no need for execution, directly become Executed
                             noAction;
                     endcase
-            
 
                     if (to_exec) begin
                         // find an ALU pipeline
@@ -787,9 +775,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
-                                regs_ready: regs_ready_aggr, // alu will recv bypass
-                                idx: ?,
-                                atROBTop: ?
+                                regs_ready: regs_ready_aggr // alu will recv bypass
                             });
                         end
                         else begin
@@ -809,9 +795,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
-                                regs_ready: regs_ready_aggr, // fpu mul div recv bypass
-                                idx: ?,
-                                atROBTop: ?
+                                regs_ready: regs_ready_aggr // fpu mul div recv bypass
                             });
                             doAssert(ppc == pc + 4, "FpuMulDiv next PC is not PC+4");
                             doAssert(!isValid(dInst.csr), "FpuMulDiv never explicitly read/write CSR");
@@ -842,9 +826,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                         tag: inst_tag,
                                         spec_bits: spec_bits,
                                         spec_tag: spec_tag,
-                                        regs_ready: regs_ready_aggr, // mem currently recv bypass
-                                        idx: ?,
-                                        atROBTop: ?
+                                        regs_ready: regs_ready_aggr // mem currently recv bypass
                                     });
                                 end
                                 doAssert(ppc == pc + 4, "Mem next PC is not PC+4");
@@ -910,7 +892,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                                 trap: Invalid, // no trap
                                                 // default values of FullResult
-                                                ppc_rsidx_vaddr_csrData: PPC (ppc), // default use PPC
+                                                ppc_vaddr_csrData: PPC (ppc), // default use PPC
                                                 fflags: 0,
                                                 ////////
                                                 will_dirty_fpu_state: will_dirty_fpu_state,
@@ -919,8 +901,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 ldKilled: Invalid,
                                                 memAccessAtCommit: False, // set by ROB in case of fence
                                                 lsqAtCommitNotified: False,
-                                                translateNonSpeculatively: False,
-                                                enabledTranslation: False,
                                                 nonMMIOStDone: False,
                                                 epochIncremented: False,
                                                 spec_bits: spec_bits

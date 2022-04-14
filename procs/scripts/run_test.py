@@ -38,6 +38,7 @@ class TestType:
     assembly = 'assembly'
     assembly_fp = 'assembly_fp'
     benchmarks = 'benchmarks'
+    custom = 'custom'
 
 # assembly test programs
 assembly_tests = map(extract_asm_name,
@@ -61,6 +62,9 @@ benchmarks_tests = [
     #'spmv.riscv'
     ]
 
+custom_tests = ['test_trusted_load.elf',
+    'test_untrusted_load.elf']
+
 # parse command line args
 parser = argparse.ArgumentParser()
 parser.add_argument('--exe', required = True,
@@ -71,7 +75,8 @@ parser.add_argument('--test', required = True,
                     metavar = 'TEST_TYPE', dest = 'test',
                     choices = [TestType.assembly,
                                TestType.assembly_fp,
-                               TestType.benchmarks])
+                               TestType.benchmarks,
+                               TestType.custom])
 parser.add_argument('--cores', required = True,
                     metavar = 'CORE_NUM', dest = 'core_num')
 parser.add_argument('--outdir', required = False,
@@ -95,6 +100,9 @@ elif args.test == TestType.assembly_fp:
 elif args.test == TestType.benchmarks:
     test_dir = os.path.join(test_bin_dir, 'benchmarks')
     tests = benchmarks_tests
+elif args.test == TestType.custom:
+    test_dir = os.path.join(test_bin_dir, 'custom')
+    tests = custom_tests
 
 # create output log folder and go to it
 if not os.path.exists(out_dir):
