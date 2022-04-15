@@ -234,9 +234,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // pipeline fifos
     let dispToRegQ <- mkMemDispToRegFifo;
     let regToExeQ <- mkMemRegToExeFifo;
-`ifdef SECURITY
-    Ehr#(2, Data) vaddr <- mkEhr(?);
-`endif
 
     // wire to recv bypass
     Vector#(TMul#(2, AluExeNum), RWire#(Tuple2#(PhyRIndx, Data))) bypassWire <- replicateM(mkRWire);
@@ -406,29 +403,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     endrule
 
-`ifdef SECURITY
-    rule get_addr_enclave_check;
-        let dispToReg = dispToRegQ.first;
-        let x = dispToReg.data;
 
-        let regsReady = inIfc.sbCons_lazyLookup(x.regs);
-
-        Data rVal1 = ?;
-        if(x.regs.src1 matches tagged Valid .src1) begin
-            rVal1 <- readRFBypass(src1, regsReady.src1, inIfc.rf_rd1(src1), bypassWire);
-        end
-        vaddr[0] <= rVal1;
-    endrule
-
-    function Bool should_begin_translation;
-        Bool is_trusted_walk = (vaddr[1] & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase);
-	return is_trusted_walk || (inIfc.rob_top_tag == dispToRegQ.first.data.tag);
-    endfunction
     
-`else
-    function Bool should_begin_translation = True;
-`endif
-    rule doRegReadMem if (should_begin_translation);
+    rule doRegReadMem;
         dispToRegQ.deq;
         let dispToReg = dispToRegQ.first;
         let x = dispToReg.data;
@@ -463,14 +440,28 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
     endrule
 
-    rule doExeMem;
+    function Addr vaddr;
+        let x = regToExeQ.first.data;
+        return x.rVal1 + signExtend(x.imm);
+    endfunction
+`ifdef SECURITY
+
+    function Bool should_begin_translation;
+        Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase);
+	return is_trusted_walk || (inIfc.rob_top_tag == dispToRegQ.first.data.tag);
+    endfunction
+    
+`else
+    function Bool should_begin_translation = True;
+`endif
+
+    rule doExeMem if (should_begin_translation);
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
         if(verbose) $display("[doExeMem] ", fshow(regToExe));
 
         // get virtual addr & St/Sc/Amo data
-        Addr vaddr = x.rVal1 + signExtend(x.imm);
         Data data = x.rVal2;
 
         // get shifted data and BE
