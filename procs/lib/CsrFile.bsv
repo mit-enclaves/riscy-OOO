@@ -787,7 +787,7 @@ module mkCsrFile#(Data hartid)(CsrFile);
             // XXX Because of the effects of mprv, we have to use prv_reg here
             // instead of prv. Otherwise, we may be in M mode, but prv=S, and
             // still forbid shared accesses
-            sanctum_authShared: mspec_reg != mSpecAll || prv_reg == prvM
+            sanctum_authShared: True //mspec_reg != mSpecAll || prv_reg == prvM
 `endif
         };
     endmethod

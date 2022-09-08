@@ -410,6 +410,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let dispToReg = dispToRegQ.first;
         let x = dispToReg.data;
         if(verbose) $display("[doRegReadMem] ", fshow(dispToReg));
+	if (verbose) $display("csr mask: ", fshow(inIfc.csrf_rd(CSRmevmask)), ", base: ", inIfc.csrf_rd(CSRmevbase));
 
         // check conservative scoreboard
         let regsReady = inIfc.sbCons_lazyLookup(x.regs);
@@ -438,6 +439,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
   	       },
   	       spec_bits: dispToReg.spec_bits
         });
+	if (verbose) $display("got addr %x", rVal1);
+    endrule
+
+    rule get_top_rob;
+    	if (verbose) $display ("[get_top_rob] ", fshow(regToExeQ.first));
+	if (verbose) $display("head rob: ", fshow(inIfc.rob_top_tag));
     endrule
 
     function Addr vaddr;
@@ -447,8 +454,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `ifdef SECURITY
 
     function Bool should_begin_translation;
-        Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase);
-	return is_trusted_walk || (inIfc.rob_top_tag == dispToRegQ.first.data.tag);
+        Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
+	return is_trusted_walk || (inIfc.rob_top_tag == regToExeQ.first.data.tag);
     endfunction
     
 `else
