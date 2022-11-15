@@ -282,6 +282,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
+
         method Action respLd(DProcReqId id, Data d);
             LdQTag tag = truncate(id);
             memRespLdQ.enq(tuple2(tag, d));
@@ -357,6 +358,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endinterface);
     // non-blocking coherent D$
     DCoCache dMem <- mkDCoCache(procRespIfc);
+`ifdef ENCLAVE_DEBUG
+    Reg#(Bit#(32)) stallCnt <- mkReg(0);
+`endif
 
 `ifdef SELF_INV_CACHE
     // Waiting bit for reconcile to be performed. We set the bit and start
@@ -447,6 +451,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 	if (verbose) $display("head rob: ", fshow(inIfc.rob_top_tag));
     endrule
 
+
     function Addr vaddr;
         let x = regToExeQ.first.data;
         return x.rVal1 + signExtend(x.imm);
@@ -462,15 +467,26 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     function Bool should_begin_translation = True;
 `endif
 
+
+
+`ifdef ENCLAVE_DEBUG
+    rule updateCnt;
+	    stallCnt <= stallCnt + 1;
+    endrule
+`endif
+
     rule doExeMem if (should_begin_translation);
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
         if(verbose) $display("[doExeMem] ", fshow(regToExe));
-
+`ifdef ENCLAVE_DEBUG
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+`endif
+    
         // get virtual addr & St/Sc/Amo data
         Data data = x.rVal2;
-
+    
         // get shifted data and BE
         // we can use virtual addr to shift, since page size > dword size
         ByteEn origBE = lsq.getOrigBE(x.ldstq_tag);
@@ -479,13 +495,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return tuple2(unpack(pack(be) << byteOffset), d << {byteOffset, 3'b0});
         endfunction
         let {shiftBE, shiftData} = getShiftedBEData(vaddr, origBE, data);
-
+    
         // update LSQ data now
         if(x.ldstq_tag matches tagged St .stTag) begin
             Data d = x.mem_func == Amo ? data : shiftData; // XXX don't shift for AMO
             lsq.updateData(stTag, d);
         end
-
+    
         // go to next stage by sending to TLB
         dTlb.procReq(DTlbReq {
             inst: MemExeToFinish {

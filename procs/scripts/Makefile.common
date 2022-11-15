@@ -232,6 +232,10 @@ ifeq ($(RENAME_DEBUG),true)
 CONNECTALFLAGS += --bscflags=" -D RENAME_DEBUG "
 endif
 
+ifeq ($(ENCLAVE_DEBUG), true)
+CONNECTALFLAGS += --bscflags=" -D ENCLAVE_DEBUG "
+endif
+
 # FPU implementation
 ifeq ($(USE_XILINX_FPU),true)
 CONNECTALFLAGS += --bscflags=" -D USE_XILINX_FPU "
