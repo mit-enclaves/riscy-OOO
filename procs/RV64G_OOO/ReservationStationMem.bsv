@@ -64,7 +64,6 @@ typedef struct{
     // scheduling
     RegsReady regs_ready;
     Bit#(TLog#(size)) rsIdx;
-    Bool atROBHead;
 } ToReservationStationMemSec#(type a, numeric type size) deriving(Bits, Eq, FShow);
 `endif
 
@@ -294,8 +293,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
                 src3: True,
                 dst: True
             },
-	    rsIdx: i,
-	    atROBHead: at_rob_head[i]
+	    rsIdx: i
         };
     endmethod
 

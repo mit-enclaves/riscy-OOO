@@ -58,7 +58,6 @@ typedef struct {
     InstTag tag;
     LdStQTag ldstq_tag;
     Bit#(TLog#(`RS_MEM_SIZE)) rsIdx;
-    Bool atROBHead;
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -71,7 +70,6 @@ typedef struct {
     Data rVal1;
     Data rVal2;
     Bit#(TLog#(`RS_MEM_SIZE)) rsIdx;
-    Bool atROBHead;
 } MemRegReadToExe deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -397,7 +395,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
 `ifdef SECURITY
 	        rsIdx: x.rsIdx,
-	        atROBHead: x.atROBHead,
 `endif
                 ldstq_tag: x.data.ldstq_tag
             },
@@ -445,7 +442,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
   	           ldstq_tag: x.ldstq_tag,
 `ifdef SECURITY
 	           rsIdx: x.rsIdx,
-	           atROBHead: x.atROBHead,
 `endif
   	           rVal1: rVal1,
   	           rVal2: rVal2
@@ -469,7 +465,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     function Bool should_begin_translation;
         Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
-	return is_trusted_walk || (regToExeQ.first.data.atROBHead);
+	return is_trusted_walk || (regToExeQ.first.data.tag == inIfc.rob_top_tag);
     endfunction
 
     rule notifyRSROB;
