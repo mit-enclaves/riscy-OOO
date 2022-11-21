@@ -34,6 +34,7 @@ typedef struct {
     DirPredTrainInfo dpTrain;
 } AluRSData deriving(Bits, Eq, FShow);
 
+
 // ALU pipeline is aggressive, i.e. it recv bypass and early RS wakeup
 typedef ReservationStation#(`RS_ALU_SIZE, WrAggrPortNum, AluRSData) ReservationStationAlu;
 (* synthesize *)

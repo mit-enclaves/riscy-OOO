@@ -139,7 +139,7 @@ module mkFpuMulDivExePipeline#(FpuMulDivExeInput inIfc)(FpuMulDivExePipeline);
 
     rule doDispatchFpuMulDiv;
         rsFpuMulDiv.doDispatch;
-        let x = rsFpuMulDiv.dispatchData;
+        let x <- rsFpuMulDiv.dispatchData();
         if(verbose) $display("[doDispatchFpuMulDiv] ", fshow(x));
 
         // FPU MUL DIV never have exception or misprecition, so no spec tag

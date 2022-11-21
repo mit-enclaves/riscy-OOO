@@ -23,9 +23,6 @@
 
 `include "ProcConfig.bsv"
 import Vector::*;
-`ifdef SECURITY
-import Ehr::*;
-`endif
 import BuildVector::*;
 import GetPut::*;
 import ClientServer::*;
@@ -60,6 +57,8 @@ typedef struct {
     PhyRegs regs;
     InstTag tag;
     LdStQTag ldstq_tag;
+    Bit#(TLog#(`RS_MEM_SIZE)) rsIdx;
+    Bool atROBHead;
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -71,6 +70,8 @@ typedef struct {
     // src reg vals
     Data rVal1;
     Data rVal2;
+    Bit#(TLog#(`RS_MEM_SIZE)) rsIdx;
+    Bool atROBHead;
 } MemRegReadToExe deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -136,6 +137,7 @@ module mkDTlbSynth(DTlbSynth);
     let m <- mkDTlb(getTlbReq);
     return m;
 endmodule
+
 
 interface MemExeInput;
     // conservative scoreboard check in reg read stage
@@ -229,7 +231,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
 
     // reservation station
-    ReservationStationMem rsMem <- mkReservationStationMem;
+    ReservationStationMem rsMem <- mkReservationStationMem();
 
     // pipeline fifos
     let dispToRegQ <- mkMemDispToRegFifo;
@@ -378,8 +380,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     //=======================================================
 
     rule doDispatchMem;
-     	rsMem.doDispatch;
-        let x = rsMem.dispatchData;
+        let x <- rsMem.dispatchData();
         if(verbose) $display("[doDispatchMem] ", fshow(x));
 
         // check store not having dst reg: this is for setting store to be
@@ -394,6 +395,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 imm: x.data.imm,
                 regs: x.regs,
                 tag: x.tag,
+`ifdef SECURITY
+	        rsIdx: x.rsIdx,
+	        atROBHead: x.atROBHead,
+`endif
                 ldstq_tag: x.data.ldstq_tag
             },
             spec_bits: x.spec_bits
@@ -438,6 +443,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
   	           imm: x.imm,
   	           tag: x.tag,
   	           ldstq_tag: x.ldstq_tag,
+`ifdef SECURITY
+	           rsIdx: x.rsIdx,
+	           atROBHead: x.atROBHead,
+`endif
   	           rVal1: rVal1,
   	           rVal2: rVal2
   	       },
@@ -460,8 +469,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     function Bool should_begin_translation;
         Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
-	return is_trusted_walk || (inIfc.rob_top_tag == regToExeQ.first.data.tag);
+	return is_trusted_walk || (regToExeQ.first.data.atROBHead);
     endfunction
+
+    rule notifyRSROB;
+        rsMem.checkSpecEntries(inIfc.rob_top_tag);
+    endrule
     
 `else
     function Bool should_begin_translation = True;
@@ -471,11 +484,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 `ifdef ENCLAVE_DEBUG
     rule updateCnt;
-	    stallCnt <= stallCnt + 1;
+        stallCnt <= stallCnt + 1;
     endrule
 `endif
 
     rule doExeMem if (should_begin_translation);
+	    
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
@@ -502,18 +516,38 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             lsq.updateData(stTag, d);
         end
     
+`ifdef SECURITY
         // go to next stage by sending to TLB
-        dTlb.procReq(DTlbReq {
-            inst: MemExeToFinish {
-                mem_func: x.mem_func,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                shiftedBE: shiftBE,
-                vaddr: vaddr,
-                misaligned: memAddrMisaligned(vaddr, origBE)
-            },
-            specBits: regToExe.spec_bits
-        });
+        if (should_begin_translation) begin
+            dTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: shiftBE,
+                    vaddr: vaddr,
+                    misaligned: memAddrMisaligned(vaddr, origBE)
+                },
+                specBits: regToExe.spec_bits
+            });
+     	    rsMem.doDispatchIdx(x.rsIdx);
+	end else begin
+	    rsMem.setRedispatch(x.rsIdx);
+	    $display("[doExeMem]: squashing request");
+	end
+`else 
+            dTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: shiftBE,
+                    vaddr: vaddr,
+                    misaligned: memAddrMisaligned(vaddr, origBE)
+                },
+                specBits: regToExe.spec_bits
+            });
+`endif
     endrule
 
     rule doFinishMem;
