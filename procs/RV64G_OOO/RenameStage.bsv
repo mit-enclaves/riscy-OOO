@@ -513,7 +513,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 // can process, send to Mem rs and LSQ
                 lsq_tag = lsqTag; // record LSQ tag
                 if (dInst.iType != Fence) begin // Fence does not go to RS
-                    reservationStationMem.enq(ToReservationStation {
+                    reservationStationMem.enq(ToReservationStationMem {
                         data: MemRSData {
                             mem_func: mem_inst.mem_func,
                             imm: validValue(dInst.imm),
@@ -816,7 +816,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 memExeUsed = True; // mark resource used
                                 lsq_tag = lsqTag; // record LSQ tag
                                 if (dInst.iType != Fence) begin // fence does not go to RS
-                                    reservationStationMem.enq(ToReservationStation {
+                                    reservationStationMem.enq(ToReservationStationMem {
                                         data: MemRSData {
                                             mem_func: mem_inst.mem_func,
                                             imm: validValue(dInst.imm),

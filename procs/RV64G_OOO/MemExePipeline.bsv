@@ -488,7 +488,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 `endif
 
-    rule doExeMem if (should_begin_translation);
+    rule doExeMem;
 	    
         regToExeQ.deq;
         let regToExe = regToExeQ.first;

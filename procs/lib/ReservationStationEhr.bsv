@@ -47,20 +47,6 @@ typedef struct{
     RegsReady regs_ready;
 } ToReservationStation#(type a) deriving(Bits, Eq, FShow);
 
-`ifdef SECURITY
-typedef struct{
-    a data;
-    PhyRegs regs;
-    InstTag tag;
-    // speculation
-    SpecBits spec_bits;
-    Maybe#(SpecTag) spec_tag;
-    // scheduling
-    RegsReady regs_ready;
-    Bit#(TLog#(size)) rsIdx;
-    Bool atROBHead;
-} ToReservationStationSec#(type a, numeric type size) deriving(Bits, Eq, FShow);
-`endif
 
 interface ReservationStation#(
     numeric type size, numeric type setRegReadyNum, type a
@@ -69,14 +55,7 @@ interface ReservationStation#(
     method Bool canEnq;
 
     method Action setRobEnqTime(InstTime t);
-`ifdef SECURITY
-    method Action checkSpecEntries(InstTag t);
-    method ActionValue#(ToReservationStationSec#(a, size)) dispatchData;
-    method Action setRedispatch(Bit#(TLog#(size)) rsIdx);
-    method Action doDispatchIdx(Bit#(TLog#(size)) i);
-`else 
     method ToReservationStation#(a) dispatchData;
-`endif
     method Action doDispatch;
 
 
@@ -124,12 +103,6 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag    <- replicateM(mkRegU);
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
-`ifdef SECURITY
-    Vector#(size, Reg#(Bool))                        to_dispatch <- replicateM(mkRegU);
-    Vector#(size, Ehr#(2, Bool))                     redispatch  <- replicateM(mkEhr(?));
-    Vector#(size, Wire#(Bool))                       redispatch_ready  <- replicateM(mkBypassWire);
-    Vector#(size, Wire#(Bool))                       at_rob_head <- replicateM(mkBypassWire);
-`endif
 
     // wrong spec conflict with enq and dispatch
     RWire#(void) wrongSpec_enq_conflict <- mkRWire;
@@ -191,12 +164,9 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     function Bool get_ready(Wire#(Bool) r);
         return r;
     endfunction
-`ifdef SECURITY
-    Vector#(size, Bool) can_schedule = zipWith( \&& , zipWith( \|| , readVReg(to_dispatch), readVReg(redispatch_ready)),
-                                                     zipWith( \&& , readVEhr(valid_dispatch_port, valid),
-                                                                    map(get_ready, ready_wire) ));
+    Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid),
+                                                                    map(get_ready, ready_wire)) ;
  
-`endif
     
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
@@ -262,10 +232,6 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         regs_ready[idx][ready_enq_port] <= x.regs_ready;
         // conflict with wrong spec
         wrongSpec_enq_conflict.wset(?);
-`ifdef SECURITY
-	to_dispatch[idx] <= True;
-	redispatch[idx][1] <= False;
-`endif
     endmethod
     method Bool canEnq = isValid(enqP);
 
@@ -273,44 +239,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         robEnqTime <= t;
     endmethod
 
-`ifdef SECURITY
-    method ActionValue#(ToReservationStationSec#(a, size)) dispatchData if (can_schedule_index matches tagged Valid .i);
-    	to_dispatch[i] <= False;
-	redispatch[i][1] <= False;
-        return ToReservationStationSec{
-            data: data[i],
-            regs: regs[i],
-            tag: tag[i],
-            spec_bits: spec_bits[i][sb_dispatch_port],
-            spec_tag: spec_tag[i],
-            regs_ready: RegsReady { // must be all true
-                src1: True,
-                src2: True,
-                src3: True,
-                dst: True
-            },
-	    rsIdx: i,
-	    atROBHead: at_rob_head[i]
-        };
-    endmethod
-
-    method Action checkSpecEntries(InstTag t);
-	for (Integer i = 0; i < valueof(size); i = i+1) begin
-	    at_rob_head[i] <= tag[i] == t;
-	    redispatch_ready[i] <= redispatch[i][1] && (tag[i] == t);
-	    if (redispatch[i][1] && (tag[i] == t)) begin 
-	        $display("[ReservationStationMem] - redispatching tag ", fshow(t));
-	    end
-	end
-    endmethod
-
-    method Action setRedispatch(idxT i);
-    	redispatch[i][0] <= True;
-	$display("[ReservationStationMem - setRedispatch for ix %i", i);
-    endmethod
-`else 
     method ToReservationStation#(a) dispatchData if (can_schedule_index matches tagged Valid .i);
-        return ToReservationStationSec{
+        return ToReservationStation{
             data: data[i],
             regs: regs[i],
             tag: tag[i],
@@ -324,17 +254,9 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
             }
         };
     endmethod
-`endif
 
-`ifdef SECURITY
-    method Action doDispatchIdx(idxT i);
-        valid[i][valid_dispatch_port] <= False;
-        // conflict with wrong spec
-        wrongSpec_dispatch_conflict.wset(?);
-    endmethod
-`endif
     method Action doDispatch if (can_schedule_index matches tagged Valid .i);
-        valid[0][valid_dispatch_port] <= False;
+        valid[i][valid_dispatch_port] <= False;
         // conflict with wrong spec
         wrongSpec_dispatch_conflict.wset(?);
     endmethod

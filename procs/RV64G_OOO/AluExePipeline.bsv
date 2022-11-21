@@ -187,7 +187,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 
     rule doDispatchAlu;
         rsAlu.doDispatch;
-        let x <- rsAlu.dispatchData();
+        let x = rsAlu.dispatchData();
         if(verbose) $display("[doDispatchAlu] ", fshow(x));
 
         // set reg ready aggressively
