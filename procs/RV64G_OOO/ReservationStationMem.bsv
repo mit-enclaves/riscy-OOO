@@ -130,7 +130,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
 `ifdef SECURITY
     Vector#(size, Reg#(Bool))                        to_dispatch <- replicateM(mkRegU);
-    Vector#(size, Ehr#(2, Bool))                     redispatch  <- replicateM(mkEhr(?));
+    Vector#(size, Reg#(Bool))                     redispatch  <- replicateM(mkRegU);
     Vector#(size, Wire#(Bool))                       redispatch_ready  <- replicateM(mkBypassWire);
     Vector#(size, Wire#(Bool))                       at_rob_head <- replicateM(mkBypassWire);
 `endif
@@ -268,7 +268,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         wrongSpec_enq_conflict.wset(?);
 `ifdef SECURITY
 	to_dispatch[idx] <= True;
-	redispatch[idx][1] <= False;
+	redispatch[idx] <= False;
 `endif
     endmethod
     method Bool canEnq = isValid(enqP);
@@ -280,7 +280,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 `ifdef SECURITY
     method ActionValue#(ToReservationStationMemSec#(a, size)) dispatchData if (can_schedule_index matches tagged Valid .i);
     	to_dispatch[i] <= False;
-	redispatch[i][1] <= False;
+	redispatch[i] <= False;
         return ToReservationStationMemSec{
             data: data[i],
             regs: regs[i],
@@ -300,15 +300,15 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     method Action checkSpecEntries(InstTag t);
 	for (Integer i = 0; i < valueof(size); i = i+1) begin
 	    at_rob_head[i] <= tag[i] == t;
-	    redispatch_ready[i] <= redispatch[i][1] && (tag[i] == t);
-	    if (redispatch[i][1] && (tag[i] == t)) begin 
+	    redispatch_ready[i] <= redispatch[i] && (tag[i] == t);
+	    if (redispatch[i] && (tag[i] == t)) begin 
 	        $display("[ReservationStationMem] - redispatching tag ", fshow(t));
 	    end
 	end
     endmethod
 
     method Action setRedispatch(idxT i);
-    	redispatch[i][0] <= True;
+    	redispatch[i] <= True;
 	$display("[ReservationStationMem - setRedispatch for ix ", i);
     endmethod
 `else 
