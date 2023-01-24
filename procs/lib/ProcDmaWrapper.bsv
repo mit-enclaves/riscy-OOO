@@ -87,6 +87,10 @@ module mkProcDmaWrapper#(
     Reset portalRst <- exposeCurrentReset;
 
     // user clock
+`ifdef AWSF1_DERIVED_CLOCK
+    Clock userClk = host.derivedClock;
+    Reset userRst = host.derivedReset;
+`else
 `ifndef BSIM
     UserClkRst userClkRst <- mkUserClkRst(`USER_CLK_PERIOD);
     Clock userClk = userClkRst.clk;
@@ -94,6 +98,7 @@ module mkProcDmaWrapper#(
 `else
     Clock userClk = portalClk;
     Reset userRst = portalRst;
+`endif
 `endif
 
     // instantiate DDR3

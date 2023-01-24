@@ -88,7 +88,7 @@ CPPFILES = $(PROC_CPP_DIR)/testproc.cpp \
 		   $(PROC_CPP_DIR)/to_host.cpp \
 		   $(PROC_CPP_DIR)/print_buff.cpp
 
-CONNECTALFLAGS += -D IMPORT_HOSTIF -D XILINX_SYS_CLK --nocache -v
+CONNECTALFLAGS +=  -D XILINX_SYS_CLK --nocache -v
 CONNECTALFLAGS += --bscflags=" -D USER_CLK_PERIOD=$(USER_CLK_PERIOD) "
 CONNECTALFLAGS += --bsvpath=$(FPGA_LIB_DIR) --bsvpath=$(PROC_LIB_DIR) --bsvpath=$(PROC_BSV_DIR) --bsvpath=$(COHERENCE_DIR)
 CONNECTALFLAGS += --verilog $(XILINX_IP_DIR)/reset_regs --verilog $(XILINX_IP_DIR)/fpu
@@ -280,6 +280,10 @@ $(SYNC_BRAM_FIFO_XCI): $(CORE_SCRIPT_DIR)/synth_sync_bram_fifo.tcl
 # AWS needs to know sync fifo is used
 ifeq ($(BOARD),awsf1)
 CONNECTALFLAGS += -D AWSF1_SYNC_FIFO
+CONNECTALFLAGS += -D AWSF1_DERIVED_CLOCK=clk_extra_a1
+CONNECTALFLAGS += -D IMPORT_HOST_CLOCKS
+else
+CONNECTALFLAGS += -D IMPORT_HOSTIF
 endif
 
 # VC707 needs some more clocking constraints
