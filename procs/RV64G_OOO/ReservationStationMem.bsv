@@ -32,6 +32,12 @@ import Ehr::*;
 import GetPut::*;
 import Assert::*;
 
+typedef enum {
+   NoRedispatch,
+   WaitForRedispatch,
+   Redispatch
+} RedispatchStatus deriving (Bits, Eq, FShow);
+
 typedef struct {
     MemFunc mem_func;
     ImmData imm;
@@ -129,10 +135,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
 `ifdef SECURITY
-    Vector#(size, Reg#(Bool))                        to_dispatch <- replicateM(mkRegU);
-    Vector#(size, Ehr#(2, Bool))                     redispatch  <- replicateM(mkEhr(?));
-    Vector#(size, Wire#(Bool))                       redispatch_ready  <- replicateM(mkBypassWire);
-    Vector#(size, Wire#(Bool))                       at_rob_head <- replicateM(mkBypassWire);
+    Vector#(size, Ehr#(2,Bool))                        to_dispatch <- replicateM(mkEhr(?));
+    Vector#(size, Ehr#(3, RedispatchStatus))                     redispatch  <- replicateM(mkEhr(NoRedispatch));
 `endif
 
     // wrong spec conflict with enq and dispatch
@@ -192,15 +196,34 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         joinActions(map(setReady, idxVec));
     endrule
 
+
     function Bool get_ready(Wire#(Bool) r);
         return r;
     endfunction
+
+    function Bool should_redispatch(RedispatchStatus s);
+        return s == Redispatch;
+    endfunction
 `ifdef SECURITY
-    Vector#(size, Bool) can_schedule = zipWith( \&& , zipWith( \|| , readVReg(to_dispatch), readVReg(redispatch_ready)),
+    Vector#(size, Bool) can_schedule = zipWith( \&& , zipWith( \|| , readVEhr(0, to_dispatch), map(should_redispatch, readVEhr(2, redispatch))),
                                                      zipWith( \&& , readVEhr(valid_dispatch_port, valid),
                                                                     map(get_ready, ready_wire) ));
- 
+/*
+`ifdef ENCLAVE_DEBUG
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule showScheduling;
+        for (Integer i = 0; i < valueOf(size); i = i + 1) begin
+            $display("to_dispatch: %b, redispatch_ready: %b, valid: %b, ready: %b, ready1: %b, ready2: %b, ready3: %b", to_dispatch[i], redispatch_ready[i], valid[i][0], get_ready(ready_wire[i]), regs_ready[i][0].src1, regs_ready[i][0].src2, regs_ready[i][0].src3);
+	end
+    endrule
+
 `endif
+*/
+ 
+`else
+    Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid), map(get_ready, ready_wire) );
+`endif
+
     
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
@@ -267,8 +290,10 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         // conflict with wrong spec
         wrongSpec_enq_conflict.wset(?);
 `ifdef SECURITY
-	to_dispatch[idx] <= True;
-	redispatch[idx][1] <= False;
+	to_dispatch[idx][1] <= True;
+
+	//not necessary due to dispatchData setting to False
+	//redispatch[idx][1] <= False;
 `endif
     endmethod
     method Bool canEnq = isValid(enqP);
@@ -279,8 +304,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 
 `ifdef SECURITY
     method ActionValue#(ToReservationStationMemSec#(a, size)) dispatchData if (can_schedule_index matches tagged Valid .i);
-    	to_dispatch[i] <= False;
-	redispatch[i][1] <= False;
+    	to_dispatch[i][0] <= False;
+	redispatch[i][2] <= NoRedispatch;
         return ToReservationStationMemSec{
             data: data[i],
             regs: regs[i],
@@ -299,16 +324,18 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 
     method Action checkSpecEntries(InstTag t);
 	for (Integer i = 0; i < valueof(size); i = i+1) begin
-	    at_rob_head[i] <= tag[i] == t;
-	    redispatch_ready[i] <= redispatch[i][1] && (tag[i] == t);
-	    if (redispatch[i][1] && (tag[i] == t)) begin 
+	    let newRedispatch = (redispatch[i][1] == WaitForRedispatch && (tag[i] == t)) ? Redispatch : redispatch[i][1];
+
+	    redispatch[i][1] <= newRedispatch;
+	    if (newRedispatch == Redispatch) begin 
 	        $display("[ReservationStationMem] - redispatching tag ", fshow(t));
 	    end
 	end
     endmethod
 
+    // test adding guard checking if redispatch == NoRedispatch
     method Action setRedispatch(idxT i);
-    	redispatch[i][0] <= True;
+    	redispatch[i][0] <= WaitForRedispatch;
 	$display("[ReservationStationMem - setRedispatch for ix ", i);
     endmethod
 `else 
