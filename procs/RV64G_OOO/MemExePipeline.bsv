@@ -380,6 +380,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDispatchMem;
         let x <- rsMem.dispatchData();
         if(verbose) $display("[doDispatchMem] ", fshow(x));
+`ifdef ENCLAVE_DEBUG
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+`endif
 
         // check store not having dst reg: this is for setting store to be
         // executed after address transation
@@ -433,6 +436,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             rVal2 <- readRFBypass(src2, regsReady.src2, inIfc.rf_rd2(src2), bypassWire);
         end
 
+`ifdef ENCLAVE_DEBUG
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+`endif
         // go to next stage
         regToExeQ.enq(ToSpecFifo {
             data: MemRegReadToExe {
@@ -527,9 +533,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 specBits: regToExe.spec_bits
             });
      	    rsMem.doDispatchIdx(x.rsIdx);
+	    $display("[doExeMem]: dispatching request, mask %x, base %x", inIfc.csrf_rd(CSRmevmask), inIfc.csrf_rd(CSRmevbase));
 	end else begin
 	    rsMem.setRedispatch(x.rsIdx);
-	    $display("[doExeMem]: squashing request");
+	    $display("[doExeMem]: squashing request, mask %x, base %x", inIfc.csrf_rd(CSRmevmask), inIfc.csrf_rd(CSRmevbase));
 	end
 `else 
             dTlb.procReq(DTlbReq {
@@ -553,6 +560,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let {paddr, cause} = dTlbResp.resp;
 
         if(verbose) $display("[doFinishMem] ", fshow(dTlbResp));
+`ifdef ENCLAVE_DEBUG
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+`endif
         if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");
 
         // check misalignment
