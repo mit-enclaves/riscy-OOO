@@ -44,10 +44,6 @@ typedef struct {
     LdStQTag ldstq_tag;
 } MemRSData deriving(Bits, Eq, FShow);
 
-function Bool f_not (Bool x);
-	 return !x;
-endfunction
-
 typedef struct{
     a data;
     PhyRegs regs;
@@ -85,6 +81,8 @@ interface ReservationStation#(
     method ActionValue#(ToReservationStationMemSec#(a, size)) dispatchData;
     method Action setRedispatch(Bit#(TLog#(size)) rsIdx);
     method Action doDispatchIdx(Bit#(TLog#(size)) i);
+`ifdef ENCLAVE_DEBUG
+    method Bit#(32) getCycleCount;
 `else 
     method ToReservationStationMem#(a) dispatchData;
 `endif
@@ -137,6 +135,9 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 `ifdef SECURITY
     Vector#(size, Ehr#(2,Bool))                        to_dispatch <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(3, RedispatchStatus))                     redispatch  <- replicateM(mkEhr(NoRedispatch));
+`ifdef ENCLAVE_DEBUG
+    Reg#(Bit#(32)) cycleCounter <- mkReg(0);
+`endif
 `endif
 
     // wrong spec conflict with enq and dispatch
@@ -206,7 +207,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     endfunction
 `ifdef SECURITY
     Vector#(size, Bool) can_schedule = zipWith( \&& , zipWith( \|| , readVEhr(0, to_dispatch), map(should_redispatch, readVEhr(2, redispatch))),
-                                                     zipWith( \&& , readVEhr(valid_dispatch_port, valid),
+                                                     zipWith( \&& , readVEhr(valid_enq_port, valid),
                                                                     map(get_ready, ready_wire) ));
 /*
 `ifdef ENCLAVE_DEBUG
@@ -278,8 +279,17 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     //    $fdisplay(stdout, "cannot enqueue in the reservation station this cycle");
     //endrule
 
+`ifdef ENCLAVE_DEBUG
+    rule updateCnt;
+        cycleCounter <= cycleCounter + 1;
+    endrule
+`endif
+
     method Action enq(ToReservationStationMem#(a) x) if (enqP matches tagged Valid .idx);
         $display("  [mkReservationStationRow::_write] ", fshow(x));
+`ifdef ENCLAVE_DEBUG
+	$display(" [ENCLAVE_DEBUG]: enqueuing to index ", fshow(idx), " at cycle ", fshow(cycleCounter));
+`endif
         valid[idx][valid_enq_port] <= True;
         data[idx] <= x.data;
         regs[idx] <= x.regs;
@@ -297,6 +307,11 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 `endif
     endmethod
     method Bool canEnq = isValid(enqP);
+
+`ifdef ENCLAVE_DEBUG
+    method Bit#(32) getCycleCount = cycleCounter;
+
+`endif
 
     method Action setRobEnqTime(InstTime t);
         robEnqTime <= t;
@@ -358,6 +373,9 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 
 `ifdef SECURITY
     method Action doDispatchIdx(idxT i);
+`ifdef ENCLAVE_DEBUG
+	$display(" [ENCLAVE_DEBUG]: dequeuing from index ", fshow(i), " at cycle ", fshow(cycleCounter));
+`endif
         valid[i][valid_dispatch_port] <= False;
         // conflict with wrong spec
         wrongSpec_dispatch_conflict.wset(?);

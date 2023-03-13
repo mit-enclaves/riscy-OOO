@@ -358,9 +358,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endinterface);
     // non-blocking coherent D$
     DCoCache dMem <- mkDCoCache(procRespIfc);
-`ifdef ENCLAVE_DEBUG
-    Reg#(Bit#(32)) stallCnt <- mkReg(0);
-`endif
 
 `ifdef SELF_INV_CACHE
     // Waiting bit for reconcile to be performed. We set the bit and start
@@ -381,7 +378,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let x <- rsMem.dispatchData();
         if(verbose) $display("[doDispatchMem] ", fshow(x));
 `ifdef ENCLAVE_DEBUG
-	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+	if (verbose) $display("[ENCLAVE_DEBUG]:  cycle counter ", fshow(rsMem.getCycleCount));
 `endif
 
         // check store not having dst reg: this is for setting store to be
@@ -437,7 +434,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
 `ifdef ENCLAVE_DEBUG
-	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(rsMem.getCycleCount));
 `endif
         // go to next stage
         regToExeQ.enq(ToSpecFifo {
@@ -484,12 +481,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 
 
-`ifdef ENCLAVE_DEBUG
-    rule updateCnt;
-        stallCnt <= stallCnt + 1;
-    endrule
-`endif
-
     rule doExeMem;
 	    
         regToExeQ.deq;
@@ -497,7 +488,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let x = regToExe.data;
         if(verbose) $display("[doExeMem] ", fshow(regToExe));
 `ifdef ENCLAVE_DEBUG
-	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(rsMem.getCycleCount));
 `endif
     
         // get virtual addr & St/Sc/Amo data
@@ -561,7 +552,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if(verbose) $display("[doFinishMem] ", fshow(dTlbResp));
 `ifdef ENCLAVE_DEBUG
-	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(stallCnt));
+	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(rsMem.getCycleCount));
 `endif
         if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");
 
