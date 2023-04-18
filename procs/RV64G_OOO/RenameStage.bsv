@@ -434,9 +434,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     // speculation control:
     // M mode: turn off speculation for mem inst only
     // non-M mode: controlled by mspec CSR
-    Bool machineMode = csrf.decodeInfo.prv == prvM;
-    Bool specNone = !machineMode && csrf.rd(CSRmspec) == zeroExtend(mSpecNone);
-    Bool specNonMem = machineMode || csrf.rd(CSRmspec) == zeroExtend(mSpecNonMem);
+    Bool specNone = (csrf.rd(CSRmspec) & zeroExtend(mSpecNone)) == zeroExtend(mSpecNone);
+    Bool specNonMem = (csrf.rd(CSRmspec) & zeroExtend(mSpecNonMem)) == zeroExtend(mSpecNonMem);
 
 `ifdef PERF_COUNT
     rule incSpecNoneCycles(inIfc.doStats && specNone);

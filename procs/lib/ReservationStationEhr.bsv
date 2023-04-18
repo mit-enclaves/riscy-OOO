@@ -31,11 +31,6 @@ import Ehr::*;
 import GetPut::*;
 import Assert::*;
 
-
-function Bool f_not (Bool x);
-	 return !x;
-endfunction
-
 typedef struct{
     a data;
     PhyRegs regs;
@@ -47,7 +42,6 @@ typedef struct{
     RegsReady regs_ready;
 } ToReservationStation#(type a) deriving(Bits, Eq, FShow);
 
-
 interface ReservationStation#(
     numeric type size, numeric type setRegReadyNum, type a
 );
@@ -57,7 +51,6 @@ interface ReservationStation#(
     method Action setRobEnqTime(InstTime t);
     method ToReservationStation#(a) dispatchData;
     method Action doDispatch;
-
 
     interface Vector#(setRegReadyNum, Put#(Maybe#(PhyRIndx))) setRegReady;
 

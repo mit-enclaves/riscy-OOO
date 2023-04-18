@@ -188,7 +188,11 @@
 
     // reservation station sizes
     `define RS_ALU_SIZE 16
+`ifdef SECURITY
+    `define RS_MEM_SIZE 18
+`else
     `define RS_MEM_SIZE 16
+`endif
     `define RS_FPUMULDIV_SIZE 16
 
 `endif
