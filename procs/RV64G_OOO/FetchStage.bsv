@@ -28,6 +28,7 @@ import DirPredictor::*;
 import Btb::*;
 import ClientServer::*;
 import Connectable::*;
+import CsrFile::*;
 import Decode::*;
 import Ehr::*;
 import Fifo::*;
@@ -48,13 +49,11 @@ import ITlb::*;
 import CCTypes::*;
 import L1CoCache::*;
 import MMIOInst::*;
+import TourPred::*;
 
 interface FetchStage;
     // pipeline
     interface Vector#(SupSize, SupFifoDeq#(FromFetchStage)) pipelines;
-
-    // CSR ifc for turning off BTB/branch dir prediction/stack address
-    interface CsrFile csrfIfc;
 
     // tlb and mem connections
     interface ITlb iTlbIfc;
@@ -84,6 +83,11 @@ interface FetchStage;
 
     // performance
     interface Perf#(DecStagePerfType) perf;
+endinterface
+
+interface FetchInput;
+    // CSR ifc for turning off BTB/branch dir prediction/stack address
+    method Data csrf_rd(CSR csr);
 endinterface
 
 typedef struct {
@@ -136,8 +140,8 @@ typedef struct {
     Addr nextPc;
 } TrainNAP deriving(Bits, Eq, FShow);
 
-(* synthesize *)
-module mkFetchStage(FetchStage);
+//(* synthesize *)
+module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch3 (decode & dir pred) < redirect method
     // Fetch1 < Fetch3 to avoid bypassing path on PC and epochs
 
@@ -206,9 +210,8 @@ module mkFetchStage(FetchStage);
     Fifo#(1, PerfResp#(DecStagePerfType)) perfRespQ <- mkCFFifo;
 
 `ifdef SECURITY
-    CsrFile csrf = inIfc.csrfIfc;
-    Bool useBranchPred = (csrf.rd(CSRmspec) & zeroExtend(mSpecNoUseBranchPred)) == 0;
-    Bool trainBranchPred = (csrf.rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0;
+    Bool useBranchPred = (inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoUseBranchPred)) == 0;
+    Bool trainBranchPred = (inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0;
 `else
     Bool useBranchPred = True;
     Bool trainBranchPred = True;
@@ -402,9 +405,9 @@ module mkFetchStage(FetchStage);
 				    dp_train = TourTrainInfo {
 				        globalHist: signExtend(hist),
 					localHist: signExtend(hist),
-					globalTaken: True
+					globalTaken: True,
 					localTaken: True
-				    }
+				    };
 				end
                             end
                             Maybe#(Addr) nextPc = decodeBrPred(in.pc, dInst, pred_taken);
@@ -461,6 +464,10 @@ module mkFetchStage(FetchStage);
                                 if (verbose) $display("ppc and decodeppc :  %h %h", in.ppc, decode_pred_next_pc);
                                 decode_epoch_local = !decode_epoch_local;
                                 redirectPc = Valid (decode_pred_next_pc); // record redirect next pc
+				in.ppc = decode_pred_next_pc;
+                                // train next addr pred when mispredict
+                                trainNAP = Valid (TrainNAP {pc: in.pc, nextPc: decode_pred_next_pc});
+`ifdef PERF_COUNT
                                 // performance stats: record decode redirect
                                 doAssert(redirectInst == Invalid, "at most 1 decode redirect per cycle");
                                 redirectInst = Valid (dInst.iType);
@@ -662,7 +669,3 @@ module mkFetchStage(FetchStage);
     endinterface
 endmodule
  
-
-// Copyright (c) 2017 Massachusetts Institute of Technology
-// 
-// Permission is hereby granted, free of charge, to any person
