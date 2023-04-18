@@ -304,7 +304,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `endif
 
 `ifndef DISABLE_SECURE_FLUSH_BP
-            inIfc.setFlushBrPred;
+            if ((inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0) inIfc.setFlushBrPred;
 `ifdef PERF_COUNT
             if(inIfc.doStats) begin
                 flushBPCnt.incr(1);
@@ -408,7 +408,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         // does not include prv info, and it has to flush when prv changes.
         // XXX As approximation, Trap may cause context switch, so flush for
         // security
-        makeSystemConsistent(False, True, False);
+        //makeSystemConsistent(False, True, False);
     endrule
 
     // commit misspeculated load
@@ -502,7 +502,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         // for security
         makeSystemConsistent(
             x.iType == SFence || write_satp, // TODO flush TLB when change sanctum regs?
-            flush_security || x.iType == Sret || x.iType == Mret,
+            flush_security,
             x.iType == FenceI // reconcile I$ for fence.i
         );
 

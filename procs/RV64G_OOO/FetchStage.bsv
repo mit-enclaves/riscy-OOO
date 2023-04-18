@@ -53,6 +53,9 @@ interface FetchStage;
     // pipeline
     interface Vector#(SupSize, SupFifoDeq#(FromFetchStage)) pipelines;
 
+    // CSR ifc for turning off BTB/branch dir prediction/stack address
+    interface CsrFile csrfIfc;
+
     // tlb and mem connections
     interface ITlb iTlbIfc;
     interface ICoCache iMemIfc;
@@ -202,6 +205,15 @@ module mkFetchStage(FetchStage);
     // perf resp FIFO
     Fifo#(1, PerfResp#(DecStagePerfType)) perfRespQ <- mkCFFifo;
 
+`ifdef SECURITY
+    CsrFile csrf = inIfc.csrfIfc;
+    Bool useBranchPred = (csrf.rd(CSRmspec) & zeroExtend(mSpecNoUseBranchPred)) == 0;
+    Bool trainBranchPred = (csrf.rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0;
+`else
+    Bool useBranchPred = True;
+    Bool trainBranchPred = True;
+`endif
+
     rule doPerfReq;
         let t <- toGet(perfReqQ).get;
         Data d = (case(t)
@@ -231,7 +243,7 @@ module mkFetchStage(FetchStage);
         // predictor, because we will break superscaler fetch if nextpc != pc+4
         Vector#(SupSize, Addr) pred_future_pc;
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            pred_future_pc[i] = nextAddrPred.predPc(pc + fromInteger(4 * i));
+            pred_future_pc[i] = useBranchPred ? nextAddrPred.predPc(pc + fromInteger(4 * i)) : (pc + fromInteger(4*i) + 4);
         end
 
         // Next pc is the first nextPc that breaks the chain of pc+4 or
@@ -380,9 +392,20 @@ module mkFetchStage(FetchStage);
                             // direction predict
                             Bool pred_taken = False;
                             if(dInst.iType == Br) begin
-                                let pred_res <- dirPred.pred[i].pred(in.pc);
-                                pred_taken = pred_res.taken;
-                                dp_train = pred_res.train;
+			    	if (useBranchPred) begin
+                                    let pred_res <- dirPred.pred[i].pred(in.pc);
+                                    pred_taken = pred_res.taken;
+                                    dp_train = pred_res.train;
+				end else begin
+				    pred_taken = True;
+				    Bit#(1) hist = 1;
+				    dp_train = TourTrainInfo {
+				        globalHist: signExtend(hist),
+					localHist: signExtend(hist),
+					globalTaken: True
+					localTaken: True
+				    }
+				end
                             end
                             Maybe#(Addr) nextPc = decodeBrPred(in.pc, dInst, pred_taken);
 
@@ -398,33 +421,35 @@ module mkFetchStage(FetchStage);
                             Bool src1_link = linkedR(regs.src1);
                             Addr push_addr = in.pc + 4;
                             Addr pop_addr = ras.ras[i].first;
-                            if (dInst.iType == J && dst_link) begin
-                                // rs1 is invalid, i.e., not link: push
-                                ras.ras[i].popPush(False, Valid (push_addr));
-                            end
-                            else if (dInst.iType == Jr) begin // jalr 
-                                if (!dst_link && src1_link) begin  
-                                    // rd is link while rs1 is not: pop
-                                    nextPc = Valid (pop_addr);
-                                    ras.ras[i].popPush(True, Invalid);
-                                end
-                                else if (!src1_link && dst_link) begin
-                                    // rs1 is not link while rd is link: push
+			    if (trainBranchPred && useBranchPred) begin
+                                if (dInst.iType == J && dst_link) begin
+                                    // rs1 is invalid, i.e., not link: push
                                     ras.ras[i].popPush(False, Valid (push_addr));
                                 end
-                                else if (dst_link && src1_link) begin
-                                    // both rd and rs1 are links
-                                    if (regs.src1 != regs.dst) begin
-                                        // not same reg: first pop, then push
+                                else if (dInst.iType == Jr) begin // jalr 
+                                    if (!dst_link && src1_link) begin  
+                                        // rd is link while rs1 is not: pop
                                         nextPc = Valid (pop_addr);
-                                        ras.ras[i].popPush(True, Valid (push_addr));
+                                        ras.ras[i].popPush(True, Invalid);
                                     end
-                                    else begin
-                                        // same reg: push
+                                    else if (!src1_link && dst_link) begin
+                                        // rs1 is not link while rd is link: push
                                         ras.ras[i].popPush(False, Valid (push_addr));
                                     end
+                                    else if (dst_link && src1_link) begin
+                                        // both rd and rs1 are links
+                                        if (regs.src1 != regs.dst) begin
+                                            // not same reg: first pop, then push
+                                            nextPc = Valid (pop_addr);
+                                            ras.ras[i].popPush(True, Valid (push_addr));
+                                        end
+                                        else begin
+                                            // same reg: push
+                                            ras.ras[i].popPush(False, Valid (push_addr));
+                                        end
+                                    end
                                 end
-                            end
+			    end
 
                             if(verbose) begin
                                 $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(in.pc), " ; ",
@@ -436,10 +461,6 @@ module mkFetchStage(FetchStage);
                                 if (verbose) $display("ppc and decodeppc :  %h %h", in.ppc, decode_pred_next_pc);
                                 decode_epoch_local = !decode_epoch_local;
                                 redirectPc = Valid (decode_pred_next_pc); // record redirect next pc
-                                in.ppc = decode_pred_next_pc;
-                                // train next addr pred when mispredict
-                                trainNAP = Valid (TrainNAP {pc: in.pc, nextPc: decode_pred_next_pc});
-`ifdef PERF_COUNT
                                 // performance stats: record decode redirect
                                 doAssert(redirectInst == Invalid, "at most 1 decode redirect per cycle");
                                 redirectInst = Valid (dInst.iType);
@@ -506,7 +527,7 @@ module mkFetchStage(FetchStage);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule doTrainNAP(isValid(napTrainByDec.wget) || isValid(napTrainByExe.wget));
+    rule doTrainNAP((isValid(napTrainByDec.wget) || isValid(napTrainByExe.wget)) && trainBranchPred);
         // Give priority to train from exe. This is because exe has train data
         // only when misprediction happens, i.e., train by dec is already at
         // wrong path.
@@ -571,14 +592,16 @@ module mkFetchStage(FetchStage);
         //    // next_pc != pc + 4 is a substitute for taken
         //    nextAddrPred.update(pc, next_pc, taken);
         //end
-        if (iType == Br) begin
-            // Train the direction predictor for all branches
-            dirPred.update(pc, taken, dpTrain, mispred);
-        end
-        // train next addr pred when mispred
-        if(mispred) begin
-            napTrainByExe.wset(TrainNAP {pc: pc, nextPc: next_pc});
-        end
+	if (trainBranchPred) begin
+            if (iType == Br) begin
+                // Train the direction predictor for all branches
+                dirPred.update(pc, taken, dpTrain, mispred);
+            end
+            // train next addr pred when mispred
+            if(mispred) begin
+                napTrainByExe.wset(TrainNAP {pc: pc, nextPc: next_pc});
+            end
+	end
     endmethod
 
     // security
@@ -639,3 +662,7 @@ module mkFetchStage(FetchStage);
     endinterface
 endmodule
  
+
+// Copyright (c) 2017 Massachusetts Institute of Technology
+// 
+// Permission is hereby granted, free of charge, to any person
