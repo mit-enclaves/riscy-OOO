@@ -150,14 +150,19 @@ module mkCore#(CoreId coreId)(Core);
 
     Reg#(Bool) started <- mkReg(False);
 
+    CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
+
+    let fetchInput = (interface FetchInput;
+        method csrf_rd = csrf.rd;
+    endinterface);
+
     // front end
-    FetchStage fetchStage <- mkFetchStage;
+    FetchStage fetchStage <- mkFetchStage(fetchInput);
     ITlb iTlb = fetchStage.iTlbIfc;
     ICoCache iMem = fetchStage.iMemIfc;
 
     // back end
     RFileSynth rf <- mkRFileSynth;
-    CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;
     SpecTagManager specTagManager <- mkSpecTagManager;

@@ -83,6 +83,7 @@ interface ReservationStation#(
     method Action doDispatchIdx(Bit#(TLog#(size)) i);
 `ifdef ENCLAVE_DEBUG
     method Bit#(32) getCycleCount;
+`endif
 `else 
     method ToReservationStationMem#(a) dispatchData;
 `endif

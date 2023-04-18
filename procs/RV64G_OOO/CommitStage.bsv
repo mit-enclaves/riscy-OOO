@@ -304,7 +304,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `endif
 
 `ifndef DISABLE_SECURE_FLUSH_BP
-            if ((inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0) inIfc.setFlushBrPred;
+            if ((csrf.rd(CSRmspec) & zeroExtend(mSpecNoTrainBranchPred)) == 0) inIfc.setFlushBrPred;
 `ifdef PERF_COUNT
             if(inIfc.doStats) begin
                 flushBPCnt.incr(1);
