@@ -71,8 +71,8 @@ typedef TSub#(LgLLLineNum, TAdd#(LgLLWayNum, LgLLBankNum)) LgLLSetNum;
 typedef Bit#(LgLLBankNum) LLBankId;
 typedef LgLLSetNum LLIndexSz;
 typedef Bit#(LLIndexSz) LLIndex;
-typedef GetTagSz#(LgLLBankNum, LgLLSetNum) LLTagSz;
-typedef Bit#(LLTagSz) LLTag;
+typedef TAdd#(GetTagSz#(LgLLBankNum, LgLLSetNum), LLIndexSz) LLTagSz; // SECURITY: Use the entire tag + index as a tag
+typedef Bit#(LLTagSz) LLTag; 
 typedef Bit#(TLog#(LLWayNum)) LLWay;
 
 
@@ -248,39 +248,61 @@ endinterface
 // FIXME This is a hack: we simulate the performance of partitioning a large
 // LLC using a smaller LLC with less partitions. So LgLLCPartitionNum should
 // NOT be viewed as the number of DRAM regions.
+
+//typedef struct{Bit#(TLog#(LLIndexSz)) sizeR; Bit#(LLIndexSz) baseR} RegionL2 deriving(Bits, Eq, FShow);
+
 `ifdef SIM_LOG_LLC_PARTITION_NUM
 typedef `SIM_LOG_LLC_PARTITION_NUM LgLLCPartitionNum;
 `else
 typedef `LOG_DRAM_REGION_NUM LgLLCPartitionNum;
 `endif
 typedef `LOG_DRAM_REGION_SIZE LgDramRegionSz;
+typedef TExp#(LgLLCPartitionNum) DramRegionNum;
 typedef TAdd#(TAdd#(LLIndexSz, LgLLBankNum), LgLineSzBytes) LLIndexBankOffsetSz;
-
-function Addr secureRotateAddr(Addr addr) provisos(
-    // region/partition id cannot be wider than index + bank id
-    Add#(LgLLCPartitionNum, a__, TAdd#(LLIndexSz, LgLLBankNum))
-);
-    // low bits: index + bank id + line offset without the higher bits which
-    // will be replaced by region/partition id
-    Bit#(TSub#(LLIndexBankOffsetSz, LgLLCPartitionNum)) low = truncate(addr);
-    // swap bits: higher bits of index + bank id to be swapped with region/partition
-    // id
-    Bit#(LgLLCPartitionNum) swap = truncate(addr >> (valueof(LLIndexBankOffsetSz) - valueof(LgLLCPartitionNum)));
-    // middle bits between swap and region
-    Bit#(TSub#(LgDramRegionSz, LLIndexBankOffsetSz)) mid = truncate(addr >> valueof(LLIndexBankOffsetSz));
-    // region/partition id
-    Bit#(LgLLCPartitionNum) region = truncate(addr >> valueof(LgDramRegionSz));
-    // high bits beyond phy mem boundary
-    Bit#(TSub#(AddrSz, TAdd#(LgLLCPartitionNum, LgDramRegionSz))) high = truncateLSB(addr);
-    // exchange swap bits with region bits
-    return {high, swap, mid, region, low};
-endfunction
+typedef TAdd#(LgLLBankNum, LgLineSzBytes) LLBankOffsetSz;
 `endif // SECURITY
 
 (* synthesize *)
 module mkLLCache(LLCache);
 `ifdef DEBUG_DMA
     staticAssert(False, "DEBUG_DMA should not be defined");
+`endif
+
+`ifdef SECURITY
+    //Vector#(DramRegionNum, Reg#(RegionL2)) configRegionL2 <-replicateM(mkReg(0));
+
+    function Addr secureRotateAddr(Addr addr) provisos(
+        // region/partition id cannot be wider than index + bank id
+        Add#(LgLLCPartitionNum, a__, TAdd#(LLIndexSz, LgLLBankNum))
+    );
+        // // Get the DRAM regionV
+        // Bit#(LgLLCPartitionNum) region = truncate(addr >> valueof(LgDramRegionSz));
+        // let cR = configRegionL2[region];
+        // let base = cR.baseR;
+        // let log_size = cr.sizeR;
+
+        // Bit#(LLIndexSz) index = truncate(addr >> valueof(LLBankOffsetSz));
+
+        // // TODO: Restric to sizes of power of 2
+        // Bit#(LLIndexSz) mask = -1 >> (valueOf(LLIndexSz) - log_size);
+        // Bit#(LLIndexSz) new_index = (index & mask) + base;
+
+        // Bit#(TSub#(AddrSz, TAdd#(LgLLCPartitionNum, LgDramRegionSz))) high = truncateLSB(addr);
+
+        // // low bits: index + bank id + line offset without the higher bits which
+        // // will be replaced by region/partition id
+        // Bit#(TSub#(LLIndexBankOffsetSz, LgLLCPartitionNum)) low = truncate(addr);
+        // // swap bits: higher bits of index + bank id to be swapped with region/partition
+        // // id
+        // Bit#(LgLLCPartitionNum) swap = truncate(addr >> (valueof(LLIndexBankOffsetSz) - valueof(LgLLCPartitionNum)));
+        // // middle bits between swap and region
+        // Bit#(TSub#(LgDramRegionSz, LLIndexBankOffsetSz)) mid = truncate(addr >> valueof(LLIndexBankOffsetSz));
+        // // region/partition id
+        // // high bits beyond phy mem boundary
+        // // exchange swap bits with region bits
+        // return {high, swap, mid, region, low};
+        return addr;
+    endfunction
 `endif
 
 `ifdef SELF_INV_CACHE
