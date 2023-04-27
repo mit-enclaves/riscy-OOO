@@ -45,10 +45,10 @@ import Performance::*;
 
 // Last-Level
 
-// whether we model the effect of MSHR partition for security purpose
+// whether we _model_ the effect of MSHR partition for security purpose
 `ifdef SECURITY
 `ifndef DISABLE_SECURE_LLC_MSHR
-`define USE_LLC_MSHR_SECURE_MODEL
+/* `define USE_LLC_MSHR_SECURE_MODEL */
 `endif
 `endif
 
@@ -129,7 +129,8 @@ module mkLastLvCRqMshr(
     Alias#(cRqT, LLRq#(LLCRqId, LLCDmaReqId, LLChild))
 );
     function Addr getAddr(cRqT r) = r.addr;
-    let m <- mkLLCRqMshr(getAddr, getNeedReqChild, getDirPendInitVal);
+    function Bit#(1) getChild(cRqT r) = r.child;
+    let m <- mkLLCRqMshr(getAddr, getChild, getNeedReqChild, getDirPendInitVal);
     return m;
 endmodule
 
@@ -145,6 +146,8 @@ typedef `SIM_LLC_ARBITER_NUM SimLLCArbNum;
 `else // Only model added latency at the pipline input, no bandwidth loss
 typedef `SIM_LLC_ARBITER_LAT SimLLCArbLat;
 `endif
+
+
 (* synthesize *)
 module mkLLPipeline(
     LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
@@ -177,8 +180,12 @@ module mkLLPipeline(
         turn <= turn == fromInteger(valueof(SimLLCArbNum) - 1) ? 0 : turn + 1;
     endrule
 
-    method Action send(pipeInT r) if(turn == 0);
-        m.send(r);
+    method Action send(pipeInT r) 
+	if ( ( r matches tagged CRq .v &&& v.mshrIdx[0] == turn) ||
+	    ( r matches tagged CRs .v &&& v.child == turn) ||
+	    ( r matches tagged MRs .v &&& v.child == turn));
+	// If it is a CRs, then child needs to equal turn
+            m.send(r);
     endmethod
 `else // !SIM_LLC_ARBITER_NUM
     // delay input
