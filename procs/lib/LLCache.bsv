@@ -180,11 +180,27 @@ module mkLLPipeline(
         turn <= turn == fromInteger(valueof(SimLLCArbNum) - 1) ? 0 : turn + 1;
     endrule
 
+    function Bit#(1) getPseudoChild(pipInT r);
+    	Bit#(1) child_id;
+    	case (r) matches
+		tagged CRq .v:
+			begin 
+				child_id = v.mshrIdx[0];
+			end
+		tagged CRs .v:
+
+			begin 
+				child_id = v.child;
+			end
+		tagged MRs .v:
+			begin 
+				child_id = v.child;
+			end
+	endcase
+	return child_id;
+    endfunction
     method Action send(pipeInT r) 
-	if ( ( r matches tagged CRq .v &&& v.mshrIdx[0] == turn) ||
-	    ( r matches tagged CRs .v &&& v.child == turn) ||
-	    ( r matches tagged MRs .v &&& v.child == turn));
-	// If it is a CRs, then child needs to equal turn
+	if (getPseudoChild(r) == turn);	// If it is a CRs, then child needs to equal turn
             m.send(r);
     endmethod
 `else // !SIM_LLC_ARBITER_NUM
