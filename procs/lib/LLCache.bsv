@@ -45,10 +45,10 @@ import Performance::*;
 
 // Last-Level
 
-// whether we model the effect of MSHR partition for security purpose
+// whether we _model_ the effect of MSHR partition for security purpose
 `ifdef SECURITY
 `ifndef DISABLE_SECURE_LLC_MSHR
-`define USE_LLC_MSHR_SECURE_MODEL
+/* `define USE_LLC_MSHR_SECURE_MODEL */
 `endif
 `endif
 
@@ -129,7 +129,8 @@ module mkLastLvCRqMshr(
     Alias#(cRqT, LLRq#(LLCRqId, LLCDmaReqId, LLChild))
 );
     function Addr getAddr(cRqT r) = r.addr;
-    let m <- mkLLCRqMshr(getAddr, getNeedReqChild, getDirPendInitVal);
+    function Bit#(1) getChild(cRqT r) = r.child[0];
+    let m <- mkLLCRqMshr(getAddr, getChild, getNeedReqChild, getDirPendInitVal);
     return m;
 endmodule
 
@@ -145,6 +146,8 @@ typedef `SIM_LLC_ARBITER_NUM SimLLCArbNum;
 `else // Only model added latency at the pipline input, no bandwidth loss
 typedef `SIM_LLC_ARBITER_LAT SimLLCArbLat;
 `endif
+
+
 (* synthesize *)
 module mkLLPipeline(
     LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
@@ -171,14 +174,49 @@ module mkLLPipeline(
     // round-robin reg: only allow entry to pipeline when turn == 0. This
     // models the effect of a circular/fair arbiter.
     Reg#(Bit#(TLog#(SimLLCArbNum))) turn <- mkReg(0);
+    FIFO#(pipeInT) indirect0 <- mkFIFO;
+    FIFO#(pipeInT) indirect1 <- mkFIFO;
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule incrTurn;
         turn <= turn == fromInteger(valueof(SimLLCArbNum) - 1) ? 0 : turn + 1;
     endrule
 
-    method Action send(pipeInT r) if(turn == 0);
-        m.send(r);
+    function Bit#(1) getPseudoChild(pipeInT r);
+    	Bit#(1) child_id = 0;
+    	case (r) matches
+		tagged CRq .v:
+			begin 
+				child_id = v.mshrIdx[0];
+			end
+		tagged CRs .v:
+
+			begin 
+				child_id = v.child[0];
+			end
+		tagged MRs .v:
+			begin 
+				child_id = v.child[0];
+			end
+	endcase
+	return child_id;
+    endfunction
+
+    rule depressurize0 if (getPseudoChild(indirect0.first()) == turn);	// If it is a CRs, then child needs to equal turn
+    	indirect0.deq();
+        m.send(indirect0.first());
+    endrule
+
+    rule depressurize1 if (getPseudoChild(indirect1.first()) == turn);	// If it is a CRs, then child needs to equal turn
+    	indirect1.deq();
+        m.send(indirect1.first());
+    endrule
+
+
+    method Action send(pipeInT r);
+    	if (getPseudoChild(r) == 0) begin 
+    		indirect0.enq(r);
+	end else indirect1.enq(r);
     endmethod
 `else // !SIM_LLC_ARBITER_NUM
     // delay input
