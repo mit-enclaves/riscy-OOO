@@ -106,7 +106,7 @@ interface Core;
     interface ChildCacheToParent#(L1Way, void) dCacheToParent;
     interface ChildCacheToParent#(L1Way, void) iCacheToParent;
     // DMA to LLC
-    interface TlbMemClient tlbToMem;
+    interface MemClient tlbToMem;
     // MMIO
     interface MMIOCoreToPlatform mmioToPlatform;
     // stats enable

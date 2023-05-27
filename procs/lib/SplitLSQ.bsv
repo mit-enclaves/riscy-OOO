@@ -280,6 +280,9 @@ typedef struct {
     LdQTag tag;
     Addr paddr;
     ByteEn shiftedBE;
+`ifdef SECURITY
+    Bool trusted;
+`endif // SECURITY
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -303,6 +306,9 @@ typedef struct {
     Maybe#(PhyDst)     dst;
     Addr               paddr;
     Bool               isMMIO;
+`ifdef SECURITY
+    Bool               trusted;
+`endif // SECURITY
     ByteEn             shiftedBE;
     Maybe#(Exception)  fault;
     Maybe#(LdKilledBy) killed;
@@ -317,6 +323,9 @@ typedef struct {
     Maybe#(PhyDst)    dst;
     Addr              paddr;
     Bool              isMMIO;
+`ifdef SECURITY
+    Bool              trusted;
+`endif // SECURITY
     ByteEn            shiftedBE;
     Data              stData;
     Maybe#(Exception) fault;
@@ -350,7 +359,11 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Exception) fault,
         // below are only meaningful wen fault is Invalid
+`ifdef SECURITY
+        Addr paddr, Bool isMMIO, Bool trusted, ByteEn shiftedBE
+`else
         Addr paddr, Bool isMMIO, ByteEn shiftedBE
+`endif // SECURITY
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -621,6 +634,9 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
+`ifdef SECURITY
+    Vector#(LdQSize, Ehr#(1, Bool))                 ld_trusted         <- replicateM(mkEhr(?));
+`endif // SECURITY
     Vector#(LdQSize, Ehr#(2, ByteEn))               ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Exception)))    ld_fault           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
@@ -675,6 +691,12 @@ module mkSplitLSQ(SplitLSQ);
     let ld_isMMIO_updAddr = getVEhrPort(ld_isMMIO, 0); // write
     let ld_isMMIO_issue   = getVEhrPort(ld_isMMIO, 1); // assert
     let ld_isMMIO_enqIss  = getVEhrPort(ld_isMMIO, 1); // assert
+    
+`ifdef SECURITY
+    let ld_trusted_findIss = getVEhrPort(ld_trusted, 0);
+    let ld_trusted_deqLd   = getVEhrPort(ld_trusted, 0);
+    let ld_trusted_updAddr = getVEhrPort(ld_trusted, 0); // write
+`endif // SECURITY
 
     let ld_shiftedBE_findIss = getVEhrPort(ld_shiftedBE, 0);
     let ld_shiftedBE_deqLd   = getVEhrPort(ld_shiftedBE, 0);
@@ -810,6 +832,9 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
+`ifdef SECURITY
+    Vector#(StQSize, Ehr#(2, Bool))                 st_trusted   <- replicateM(mkEhr(?));
+`endif // SECURITY
     Vector#(StQSize, Ehr#(2, ByteEn))               st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, Data))                 st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Exception)))    st_fault     <- replicateM(mkEhr(?));
@@ -839,6 +864,11 @@ module mkSplitLSQ(SplitLSQ);
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
     let st_isMMIO_deqSt   = getVEhrPort(st_isMMIO, 1);
+    
+`ifdef SECURITY
+    let st_trusted_updAddr = getVEhrPort(st_trusted, 0); // write
+    let st_trusted_deqSt   = getVEhrPort(st_trusted, 1);
+`endif // SECURITY
 
     let st_shiftedBE_updAddr = getVEhrPort(st_shiftedBE, 0); // write
     let st_shiftedBE_issue   = getVEhrPort(st_shiftedBE, 1);
@@ -1081,6 +1111,9 @@ module mkSplitLSQ(SplitLSQ);
             let info = LSQIssueLdInfo {
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
+`ifdef SECURITY
+                trusted: ld_trusted_findIss[tag],
+`endif // SECURITY
                 shiftedBE: ld_shiftedBE_findIss[tag]
             };
             issueLdInfo.wset(info);
@@ -1510,7 +1543,11 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Exception) fault,
+`ifdef SECURITY
+        Addr pa, Bool mmio, Bool trusted, ByteEn shift_be
+`else
         Addr pa, Bool mmio, ByteEn shift_be
+`endif // SECURITY
     );
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1552,6 +1589,9 @@ module mkSplitLSQ(SplitLSQ);
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
             ld_isMMIO_updAddr[tag] <= mmio;
+`ifdef SECURITY
+            ld_trusted_updAddr[tag] <= trusted;
+`endif // SECURITY
             ld_shiftedBE_updAddr[tag] <= shift_be;
 
 `ifndef TSO_MM
@@ -1580,6 +1620,9 @@ module mkSplitLSQ(SplitLSQ);
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
             st_isMMIO_updAddr[tag] <= mmio;
+`ifdef SECURITY
+            st_trusted_updAddr[tag] <= trusted;
+`endif // SECURITY
             st_shiftedBE_updAddr[tag] <= shift_be;
 
             // A store always try to kill younger loads
@@ -1605,9 +1648,13 @@ module mkSplitLSQ(SplitLSQ);
 
         if(verbose) begin
             $display("[LSQ - updateAddr] ", fshow(lsqTag), "; ", fshow(fault),
-                     "; ", fshow(pa), "; ", fshow(mmio), "; ", fshow(shift_be),
-                     "; ", fshow(doKill), "; ", fshow(youngerLds),
-                     "; ", fshow(curSt));
+                    "; ", fshow(pa), "; ", fshow(mmio),
+`ifdef SECURITY
+                    "; ", fshow(trusted), 
+`endif // SECURITY
+                    "; ", fshow(shift_be),
+                    "; ", fshow(doKill), "; ", fshow(youngerLds),
+                    "; ", fshow(curSt));
         end
 
         // kill younger loads
@@ -2024,6 +2071,9 @@ module mkSplitLSQ(SplitLSQ);
             dst: ld_dst[deqP],
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
+`ifdef SECURITY
+            trusted: ld_trusted_deqLd[deqP],
+`endif // SECURITY
             shiftedBE: ld_shiftedBE_deqLd[deqP],
             fault: ld_fault_deqLd[deqP],
             killed: ld_killed_deqLd[deqP]
@@ -2081,6 +2131,9 @@ module mkSplitLSQ(SplitLSQ);
             dst: st_dst[deqP],
             paddr: st_paddr_deqSt[deqP],
             isMMIO: st_isMMIO_deqSt[deqP],
+`ifdef SECURITY
+            trusted: st_trusted_deqSt[deqP],
+`endif // SECURITY
             shiftedBE: st_shiftedBE_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             fault: st_fault_deqSt[deqP]

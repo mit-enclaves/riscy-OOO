@@ -13,7 +13,7 @@ interface CoreTop;
     interface ChildCacheToParent#(L1Way, void) dCacheToParent;
     interface ChildCacheToParent#(L1Way, void) iCacheToParent;
     // DMA to LLC
-    interface TlbMemClient tlbToMem;
+    interface DmaMemClient tlbToMem;
     // MMIO
     interface MMIOCoreToPlatform mmioToPlatform;
 endinterface

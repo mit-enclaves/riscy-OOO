@@ -118,7 +118,7 @@ interface Core;
     interface ChildCacheToParent#(L1Way, void) dCacheToParent;
     interface ChildCacheToParent#(L1Way, void) iCacheToParent;
     // DMA to LLC
-    interface TlbMemClient tlbToMem;
+    interface DmaMemClient coreDmaToMem;
     // MMIO
     interface MMIOCoreToPlatform mmioToPlatform;
     // stats enable
@@ -138,6 +138,59 @@ interface CoreFixPoint;
     method Action killAll; // kill everything: used by commit stage
     interface Reg#(Bool) doStatsIfc;
 endinterface
+
+`ifdef SECURITY
+module mkDmaSharedMemArbiter#(DmaMemClient l2Tlb, DmaMemClient sharedMem) (DmaMemClient) ;
+    Reg#(Bool) turn <- mkReg(False);
+
+    rule takeTurn; turn <= ! turn; endrule
+
+    interface FifoDeq memReq;
+        method Bool notEmpty;
+            return l2Tlb.memReq.notEmpty || sharedMem.memReq.notEmpty;
+        endmethod
+
+        method Action deq;
+            if (turn && l2Tlb.memReq.notEmpty) begin // Give priority to the queue which turn it is
+                l2Tlb.memReq.deq;
+            end else if (!turn && sharedMem.memReq.notEmpty) begin
+                sharedMem.memReq.deq;
+            end else if (turn && sharedMem.memReq.notEmpty) begin // If the other queue is not empty send the request anyway
+                sharedMem.memReq.deq;
+            end else begin
+                l2Tlb.memReq.deq;
+            end
+        endmethod
+
+        method DmaMemReq first;
+            if (turn && l2Tlb.memReq.notEmpty) begin // Give priority to the queue which turn it is
+                return l2Tlb.memReq.first;
+            end else if (!turn && sharedMem.memReq.notEmpty) begin
+                return sharedMem.memReq.first;
+            end else if (turn && sharedMem.memReq.notEmpty) begin // If the other queue is not empty send the request anyway
+                return sharedMem.memReq.first;
+            end else begin
+                return l2Tlb.memReq.first;
+            end
+        endmethod
+    endinterface
+
+    interface FifoEnq respLd;
+        method Bool notFull;
+            return l2Tlb.respLd.notFull && sharedMem.respLd.notFull;
+        endmethod
+
+        method Action enq(DmaLdResp x);
+            if(x matches tagged Tlb .dummy) begin
+                l2Tlb.respLd.enq(x);
+            end else begin // Only two cases
+                sharedMem.respLd.enq(x);
+            end
+        endmethod
+    endinterface
+
+endmodule
+`endif // SECURITY
 
 (* synthesize *)
 module mkCore#(CoreId coreId)(Core);
@@ -377,7 +430,12 @@ module mkCore#(CoreId coreId)(Core);
     L2Tlb l2Tlb <- mkL2Tlb;
     mkTlbConnect(iTlb.toParent, dTlb.toParent, l2Tlb.toChildren);
 
-    // flags to flush
+`ifdef SECURITY
+    // DMA Arbiter
+    DmaMemClient arbiter <- mkDmaSharedMemArbiter(l2Tlb.toMem, coreFix.memExeIfc.secureSharedMemToMem);
+`endif // SECURITY
+
+// flags to flush
     Reg#(Bool)  flush_tlbs <- mkReg(False);
     Reg#(Bool)  update_vm_info <- mkReg(False);
     Reg#(Bool)  flush_reservation <- mkReg(False);
@@ -964,9 +1022,13 @@ module mkCore#(CoreId coreId)(Core);
     interface dCacheToParent = dMem.to_parent;
     interface iCacheToParent = iMem.to_parent;
 
-    interface tlbToMem = l2Tlb.toMem;
+`ifdef SECURITY
+    interface coreDmaToMem = arbiter;
+`else
+    interface coreDmaToMem = l2Tlb.toMem;
+`endif // SECURITY
 
-    interface mmioToPlatform = mmio.toP;
+interface mmioToPlatform = mmio.toP;
 
     method sendDoStats = csrf.sendDoStats;
     method recvDoStats = csrf.recvDoStats;

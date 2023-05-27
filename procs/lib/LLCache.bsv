@@ -129,7 +129,20 @@ module mkLastLvCRqMshr(
     Alias#(cRqT, LLRq#(LLCRqId, LLCDmaReqId, LLChild))
 );
     function Addr getAddr(cRqT r) = r.addr;
-    function Bit#(1) getChild(cRqT r) = r.child[0];
+    function Bit#(1) getChild(cRqT r);
+        if (r.id matches tagged Child .cid) 
+            return r.child[0];
+        else
+          if (r.id matches tagged Dma .dmaid)  begin
+            if (dmaid matches tagged MemLoader .dummy) begin 
+                return 0; // TODO we are putting memloader (just at boot time) with Core 0
+            end
+            else if (dmaid matches tagged CoreDma .x) begin 
+                return (x.core == 0) ? 0: 1;
+            end else return ?;
+          end
+          else return ?;
+    endfunction
     let m <- mkLLCRqMshr(getAddr, getChild, getNeedReqChild, getDirPendInitVal);
     return m;
 endmodule
@@ -351,7 +364,13 @@ module mkLLCache(LLCache);
 `else
     function Bool respLoadWithE(Bool fromMem) = fromMem;
 `endif
-    LLBankWrapper cache <- mkLLBank(mkLastLvCRqMshr, mkLLPipeline, respLoadWithE);
+
+    function LLChild getTlbId(LLCDmaReqId dmaid);
+        if (dmaid matches tagged CoreDma .x) return zeroExtend(x.core);
+        else 
+        return 0; // Memloader
+    endfunction
+    LLBankWrapper cache <- mkLLBank(mkLastLvCRqMshr, mkLLPipeline, respLoadWithE, getTlbId);
 `endif // SELF_INV_CACHE
 
     // perf counters

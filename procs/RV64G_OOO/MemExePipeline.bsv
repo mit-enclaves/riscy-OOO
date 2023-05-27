@@ -47,8 +47,10 @@ import SpecFifo::*;
 import SpecPoisonFifo::*;
 import CCTypes::*;
 import L1CoCache::*;
+import L2Tlb::*;
 import Bypass::*;
 import LatencyTimer::*;
+import CacheUtils::*;
 
 typedef struct {
     // inst info
@@ -178,6 +180,9 @@ interface MemExePipeline;
     interface SplitLSQ lsqIfc;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
+`ifdef SECURITY
+    interface DmaMemClient secureSharedMemToMem;
+`endif // SECURITY
     interface SpeculationUpdate specUpdate;
 `ifdef SELF_INV_CACHE
     interface Server#(void, void) reconcile;
@@ -238,6 +243,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // wire to recv bypass
     Vector#(TMul#(2, AluExeNum), RWire#(Tuple2#(PhyRIndx, Data))) bypassWire <- replicateM(mkRWire);
 
+`ifdef SECURITY
+    // Shared Memory Fifos
+    Fifo#(2, DmaMemReq) sharedMemReqQ <- mkCFFifo;
+    Fifo#(2, DmaLdResp) sharedMemLdRespQ <- mkCFFifo;
+`endif // SECURITY
+    
     // TLB
     DTlbSynth dTlb <- mkDTlbSynth;
 
@@ -268,13 +279,21 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
+`ifdef SECURITY
+    Fifo#(1, Tuple3#(LdQTag, Addr, Bool)) reqLdQ <- mkBypassFifo; // Add a boolean to denote trusted/untrusted access
+    Fifo#(1, Tuple2#(ProcRq#(DProcReqId), Bool)) reqLrScAmoQ <- mkBypassFifo;
+`else // SECURITY
     Fifo#(1, Tuple2#(LdQTag, Addr)) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
+`endif // SECURITY
 `ifdef TSO_MM
     Fifo#(1, Addr) reqStQ <- mkBypassFifo;
 `else
     Fifo#(1, Tuple2#(SBIndex, Addr)) reqStQ <- mkBypassFifo;
 `endif
+`ifdef SECURITY
+    Fifo#(1, SharedMemReq) reqSharedMemStQ <- mkBypassFifo;
+`endif // SECURITY
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
@@ -394,7 +413,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 regs: x.regs,
                 tag: x.tag,
 `ifdef SECURITY
-	        rsIdx: x.rsIdx,
+                rsIdx: x.rsIdx,
 `endif
                 ldstq_tag: x.data.ldstq_tag
             },
@@ -434,7 +453,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
 `ifdef ENCLAVE_DEBUG
-	if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(rsMem.getCycleCount));
+        if (verbose) $display("[ENCLAVE_DEBUG]: cycle counter ", fshow(rsMem.getCycleCount));
 `endif
         // go to next stage
         regToExeQ.enq(ToSpecFifo {
@@ -451,24 +470,30 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
   	       },
   	       spec_bits: dispToReg.spec_bits
         });
-	if (verbose) $display("got addr %x", rVal1);
+`ifdef ENCLAVE_DEBUG
+        if (verbose) $display("got addr %x", rVal1);
+`endif
     endrule
 
+`ifdef ENCLAVE_DEBUG
     rule get_top_rob;
     	if (verbose) $display ("[get_top_rob] ", fshow(regToExeQ.first));
-	if (verbose) $display("head rob: ", fshow(inIfc.rob_top_tag));
+        if (verbose) $display("head rob: ", fshow(inIfc.rob_top_tag));
     endrule
+`endif
 
-
-    function Addr vaddr;
-        let x = regToExeQ.first.data;
+    function Addr get_vaddr(MemRegReadToExe x);
         return x.rVal1 + signExtend(x.imm);
     endfunction
-`ifdef SECURITY
 
-    function Bool should_begin_translation;
-        Bool is_trusted_walk = (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
-	return is_trusted_walk || (regToExeQ.first.data.tag == inIfc.rob_top_tag);
+`ifdef SECURITY
+    function Bool is_trusted_memory(Addr vaddr);
+        return (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
+    endfunction
+    
+    function Bool should_begin_translation(MemRegReadToExe x);
+        Bool is_head_of_rob = (x.tag == inIfc.rob_top_tag);
+        return is_trusted_memory(get_vaddr(x)) || is_head_of_rob;
     endfunction
 
     rule notifyRSROB;
@@ -476,10 +501,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
     
 `else
-    function Bool should_begin_translation = True;
+    function Bool should_begin_translation(Addr addr); return True;
 `endif
-
-
 
     rule doExeMem;
 	    
@@ -492,6 +515,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     
         // get virtual addr & St/Sc/Amo data
+        Addr vaddr = get_vaddr(x);
         Data data = x.rVal2;
     
         // get shifted data and BE
@@ -511,7 +535,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     
 `ifdef SECURITY
         // go to next stage by sending to TLB
-        if (should_begin_translation) begin
+        if (should_begin_translation(x)) begin
             dTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -525,10 +549,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
      	    rsMem.doDispatchIdx(x.rsIdx);
 	    $display("[doExeMem]: dispatching request, mask %x, base %x", inIfc.csrf_rd(CSRmevmask), inIfc.csrf_rd(CSRmevbase));
-	end else begin
-	    rsMem.setRedispatch(x.rsIdx);
-	    $display("[doExeMem]: squashing request, mask %x, base %x", inIfc.csrf_rd(CSRmevmask), inIfc.csrf_rd(CSRmevbase));
-	end
+        end else begin
+            rsMem.setRedispatch(x.rsIdx);
+            $display("[doExeMem]: squashing request, mask %x, base %x", inIfc.csrf_rd(CSRmevmask), inIfc.csrf_rd(CSRmevbase));
+        end
 `else 
             dTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
@@ -570,6 +594,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // check if addr is MMIO (only valid in case of no page fault)
         Bool isMMIO = inIfc.isMMIOAddr(paddr);
+       
+`ifdef SECURITY
+        // check if addr is trusted (only valid in case of no page fault)
+        Bool trusted = is_trusted_memory(x.vaddr);
+`endif // SECURITY
+        
         // raise access fault in case of MMIO Lr/Sc
         if(!isValid(cause) && isMMIO) begin
             case(x.mem_func)
@@ -595,10 +625,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
+`ifdef SECURITY
+            x.ldstq_tag, cause, paddr, isMMIO, trusted, x.shiftedBE
+`else // SECURITY
             x.ldstq_tag, cause, paddr, isMMIO, x.shiftedBE
+`endif //SECURITY
         );
 
-        // issue non-MMIO Ld which has no excpetion and is not waiting for
+        // issue non-MMIO Ld which has no exception and is not waiting for
         // wrong path resp
         if (x.mem_func == Ld && !isMMIO &&
             !isValid(cause) && !updRes.waitWPResp) begin
@@ -612,6 +646,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             issueLd.wset(LSQIssueLdInfo {
                 tag: ldTag,
                 paddr: paddr,
+`ifdef SECURITY
+                trusted: trusted,
+`endif //SECURITY
                 shiftedBE: x.shiftedBE
             });
         end
@@ -670,7 +707,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         end
         else if(issRes == ToCache) begin
+`ifdef SECURITY
+            reqLdQ.enq(tuple3(zeroExtend(info.tag), info.paddr, info.trusted));
+`else //SECURITY
             reqLdQ.enq(tuple2(zeroExtend(info.tag), info.paddr));
+`endif //SECURITY
 `ifdef PERF_COUNT
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
@@ -761,6 +802,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doRespLd(t, d, "[doRespLdMem]");
     endrule
 
+`ifdef SECURITY
+    rule respLdSecureSharedMem;
+        sharedMemLdRespQ.deq;
+        if(sharedMemLdRespQ.first matches tagged ShrMem .resp) begin
+            LdQTag tag = truncate(resp.id);
+            memRespLdQ.enq(tuple2(tag, resp.data));
+            // early wake up RS and set SB
+            // this is done only when the resp is not wrong path
+            LSQHitInfo info <- lsq.getHit(Ld (tag));
+            if(info.dst matches tagged Valid .dst &&& !info.waitWPResp) begin
+                inIfc.setRegReadyAggr_mem(dst.indx);
+            end
+            if(verbose) begin
+                $display("[respLdSecureSharedMemory] ", fshow(resp.id), "; ", fshow(resp.data), "; ", fshow(info));
+            end
+        end else doAssert(False, "Error, should only receive ShrMem dma responses");
+    endrule
+`endif //SECURITY
+    
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
     rule doRespLdForward;
         forwardQ.deq;
@@ -768,7 +828,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doRespLd(t, d, "[doRespLdForward]");
     endrule
 
-    // deqStQ
+    // deqLdQ
     LdQDeqEntry lsqDeqLd = lsq.firstLd;
 
     // deq fault/killed ld
@@ -831,7 +891,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?
         };
+`ifdef SECURITY
+        reqLrScAmoQ.enq(tuple2(req, lsqDeqLd.trusted));
+`else // SECURITY
         reqLrScAmoQ.enq(req);
+`endif // SECURITY
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
         // check
         doAssert(!isValid(lsqDeqLd.killed), "cannot be killed");
@@ -1010,15 +1074,36 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(addr);
-        // record waiting for store resp
         LineDataOffset offset = getLineDataOffset(addr);
-        waitStRespQ.enq(WaitStResp {
-            offset: getLineDataOffset(addr),
-            shiftedBE: lsqDeqSt.shiftedBE,
-            shiftedData: lsqDeqSt.stData
-        });
-        // we leave deq to resp time
+`ifdef SECURITY
+        if(lsqDeqSt.trusted) begin
+            reqStQ.enq(addr);
+            // record waiting for store resp
+            waitStRespQ.enq(WaitStResp {
+                offset: getLineDataOffset(addr),
+                shiftedBE: lsqDeqSt.shiftedBE,
+                shiftedData: lsqDeqSt.stData
+            });
+            // we leave deq to resp time
+        end else begin
+            reqSharedMemStQ.enq(SharedMemReq {
+                addr: addr,
+                data: lsqDeqSt.stData,
+                byteEn: lsqDeqSt.shiftedBE,
+                id: 0
+            });
+            lsq.deqSt;
+        end
+`else // SECURITY
+    reqStQ.enq(addr);
+    // record waiting for store resp
+    waitStRespQ.enq(WaitStResp {
+        offset: getLineDataOffset(addr),
+        shiftedBE: lsqDeqSt.shiftedBE,
+        shiftedData: lsqDeqSt.stData
+    });
+    // we leave deq to resp time
+`endif // SECURITY
         // ROB should have already been set to executed
         if(verbose) $display("[doDeqStQ_St] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
@@ -1027,7 +1112,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     endrule
 
-`else
+`else // !TSO_MM
 
     // WEAK: deq non-MMIO St when (1) no spec bit (2) can send to SB
     rule doDeqStQ_St_Mem(
@@ -1053,7 +1138,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         stMemLatTimer.start(sbIdx);
 `endif
     endrule
-`endif
+`endif // !TSO_MM
 
     // deq Fence from SQ. need to check .aq and .rl.
 `ifdef SELF_INV_CACHE
@@ -1144,7 +1229,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 rl: lsqDeqSt.rel
             }
         };
+`ifdef SECURITY
+        reqLrScAmoQ.enq(tuple2(req, lsqDeqSt.trusted));
+`else // SECURITY
         reqLrScAmoQ.enq(req);
+`endif // SECURITY
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin
@@ -1328,8 +1417,29 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    // send req to D$
+    // send req to D$ or to L2$ through DMA
     rule sendLdToMem;
+`ifdef SECURITY
+        let {lsqTag, addr, trusted} <- toGet(reqLdQ).get;
+        if(trusted) begin
+            dMem.procReq.req(ProcRq {
+                id: zeroExtend(lsqTag),
+                addr: addr,
+                toState: multicore ? S : E, // in case of single core, just fetch to E
+                op: Ld,
+                byteEn: ?,
+                data: ?,
+                amoInst: ?
+            });
+        end else begin
+            sharedMemReqQ.enq(ShrMem (SharedMemReq {
+                addr:addr,
+                data: ?,
+                byteEn: replicate(False),
+                id: lsqTag
+            }));
+        end
+`else // SECURITY
         let {lsqTag, addr} <- toGet(reqLdQ).get;
         dMem.procReq.req(ProcRq {
             id: zeroExtend(lsqTag),
@@ -1340,7 +1450,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?
         });
+`endif // SECURITY
     endrule
+    
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
@@ -1360,17 +1472,41 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             amoInst: ?
         });
     endrule
+
+`ifdef SECURITY
+    rule sendSharedMemStToMem;
+        let req <- toGet(reqSharedMemStQ).get;
+        sharedMemReqQ.enq(ShrMem (req));
+    endrule
+`endif // SECURITY
+     
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St
     rule sendLrScAmoToMem;
+`ifdef SECURITY
+        let {r, trusted} <- toGet(reqLrScAmoQ).get;
+        if(trusted) begin
+            dMem.procReq.req(r);
+        end else begin
+            // here panic!!
+            doAssert(False, "Lr Sc nor Amo is supported on untrusted memory");
+            // sharedMemReqQ.enq(ShrMem (SharedMemReq {
+            //     addr: r.addr,
+            //     data: r.data,
+            //     byteEn: r.byteEn,
+            //     id: r.id
+            //}));
+        end
+`else // SECURITY
         let r <- toGet(reqLrScAmoQ).get;
         dMem.procReq.req(r);
+`endif // SECURITY
     endrule
 `ifdef STORE_PREFETCH
     // prefetch should give way to real mem req
     (* descending_urgency = "sendLdToMem, sendStPrefetchToMem" *)
     (* descending_urgency = "sendStToMem, sendStPrefetchToMem" *)
     (* descending_urgency = "sendLrScAmoToMem, sendStPrefetchToMem" *)
-    rule sendStPrefetchToMem;
+    rule sendStPrefetchToMem; 
         let addr <- toGet(reqStPrefetchQ).get;
         dMem.procReq.req(ProcRq {
             id: 0,
@@ -1394,6 +1530,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
+`ifdef SECURITY
+    interface DmaMemClient secureSharedMemToMem;
+        interface FifoDeq memReq = toFifoDeq(sharedMemReqQ);
+        interface FifoEnq respLd = toFifoEnq(sharedMemLdRespQ);
+    endinterface
+`endif // SECURITY
     interface specUpdate = joinSpeculationUpdate(vec(
         rsMem.specUpdate,
         dispToRegQ.specUpdate,

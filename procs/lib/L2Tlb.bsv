@@ -48,7 +48,7 @@ import LatencyTimer::*;
 typedef L2TlbReqIdx TlbMemReqId;
 
 typedef struct {
-    // this is always a load req
+    // Tlb this is always a load req but it is also secure shared memory
     Addr addr;
     TlbMemReqId id;
 } TlbMemReq deriving(Bits, Eq, FShow);
@@ -58,9 +58,24 @@ typedef struct {
     TlbMemReqId id;
 } TlbLdResp deriving(Bits, Eq, FShow);
 
-interface TlbMemClient;
-    interface FifoDeq#(TlbMemReq) memReq;
-    interface FifoEnq#(TlbLdResp) respLd;
+typedef union tagged {
+    TlbMemReqId Tlb;
+    SharedMemReqId ShrMem; 
+} DmaMemReqId deriving (Bits, Eq, FShow);
+
+typedef union tagged {
+    TlbMemReq Tlb;
+    SharedMemReq ShrMem;
+} DmaMemReq deriving (Bits, Eq, FShow); // One extra bit tells us if the idx correspond to a TLB or a Shared Memory request
+
+typedef union tagged {
+    TlbLdResp Tlb;
+    SharedLdResp ShrMem;
+} DmaLdResp deriving(Bits, Eq, FShow);
+
+interface DmaMemClient;
+    interface FifoDeq#(DmaMemReq) memReq;
+    interface FifoEnq#(DmaLdResp) respLd;
 endinterface
 
 // interface with children (I/D TLB)
@@ -95,7 +110,7 @@ interface L2Tlb;
     interface L2TlbToChildren toChildren;
 
     // ifc with memory (LLC)
-    interface TlbMemClient toMem;
+    interface DmaMemClient toMem;
 
     // performace
     interface Perf#(L2TlbPerfType) perf;
@@ -189,8 +204,8 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 
     // Memory Queues for page table walks
     // Need to have enough resp buffering to prevent clogging the memory system
-    Fifo#(2, TlbMemReq) memReqQ <- mkCFFifo;
-    Fifo#(L2TlbReqNum, TlbLdResp) respLdQ <- mkCFFifo;
+    Fifo#(2, DmaMemReq) memReqQ <- mkCFFifo;
+    Fifo#(L2TlbReqNum, DmaLdResp) respLdQ <- mkCFFifo;
     // When a mem resp comes, we first process the initiating req, then process
     // other reqs that in WaitPeer.
     Reg#(Maybe#(L2TlbReqIdx)) respForOtherReq <- mkReg(Invalid);
@@ -480,10 +495,10 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         end
         else begin
             // no one has requested before, req memory
-            memReqQ.enq(TlbMemReq {
+            memReqQ.enq(Tlb (TlbMemReq {
                 addr: pteAddr,
                 id: idx
-            });
+            }));
             pendWait_transCacheResp[idx] <= WaitMem;
         end
         if(verbose) begin
@@ -507,18 +522,18 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 
     // page walk is preempted by tlb resp rule and trans cache resp rule, i.e.,
     // don't fire when tlb resp or trans cache resp are available
-    rule doPageWalk(respLdQ.notEmpty && !tlbReqQ.notEmpty && !transCacheReqQ.notEmpty);
+    rule doPageWalk((respLdQ.notEmpty && !tlbReqQ.notEmpty && !transCacheReqQ.notEmpty) &&& respLdQ.first matches tagged Tlb .x);
         doAssert(!flushing, "cannot have pending req when flushing");
 
         // get the resp data from memory (LLC); this resp is for the initiating
         // req and other req that wait on this one, so don't deq right away
-        PTESv39 pte = unpack(respLdQ.first.data);
-        L2TlbReqIdx idx = fromMaybe(respLdQ.first.id, respForOtherReq);
+        PTESv39 pte = unpack(x.data);
+        L2TlbReqIdx idx = fromMaybe(x.id, respForOtherReq);
         L2TlbRqFromC cRq = pendReq[idx];
 
         // find another req waiting for this resp to process in next cycle
         function Bool waitForResp(L2TlbReqIdx i);
-            return pendWait_pageWalk[i] == WaitPeer (respLdQ.first.id) && i != idx;
+            return pendWait_pageWalk[i] == WaitPeer (x.id) && i != idx;
         endfunction
         Vector#(L2TlbReqNum, L2TlbReqIdx) idxVec = genWith(fromInteger);
         if(find(waitForResp, idxVec) matches tagged Valid .i) begin
@@ -618,10 +633,10 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 `endif
                     end
                     else begin
-                        memReqQ.enq(TlbMemReq {
+                        memReqQ.enq(Tlb (TlbMemReq {
                             addr: newPTEAddr,
                             id: idx
-                        });
+                        }));
                         pendWait_pageWalk[idx] <= WaitMem;
                     end
                     // add to translation cache
@@ -707,7 +722,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         interface Get flushDone = toGet(flushDoneQ);
     endinterface
 
-    interface TlbMemClient toMem;
+    interface DmaMemClient toMem;
         interface FifoDeq memReq = toFifoDeq(memReqQ);
         interface FifoEnq respLd = toFifoEnq(respLdQ);
     endinterface

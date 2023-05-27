@@ -101,11 +101,11 @@ module mkProc#(Clock portalClk, Reset portalRst)(Proc);
     mkL1LLConnect(llc.to_child, l1);
 
     // connect LLC to DMA
-    Vector#(CoreNum, TlbMemClient) tlbToMem = ?;
+    Vector#(CoreNum, DmaMemClient) coreDmaToMem = ?;
     for(Integer i = 0; i < valueof(CoreNum); i = i+1) begin
-        tlbToMem[i] = core[i].tlbToMem;
+        coreDmaToMem[i] = core[i].coreDmaToMem;
     end
-    mkLLCDmaConnect(llc.dma, memLoader.to_mem, tlbToMem);
+    mkLLCDmaConnect(llc.dma, memLoader.to_mem, coreDmaToMem);
 
     // interface LLC to DRAM and control DRAM latency
     DramLLC dramLLC <- mkDramLLC(llc.to_mem);
