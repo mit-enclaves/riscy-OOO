@@ -639,6 +639,21 @@ typedef struct {
     Bit#(1) data;
 } MMIOCRs deriving(Bits, Eq, FShow);
 
+// Secure Shared Memory
+typedef LdQTag SharedMemReqId;
+
+typedef struct {
+    Addr addr;
+    Data data;
+    ByteEn byteEn;
+    SharedMemReqId id;
+} SharedMemReq deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Data data;
+    SharedMemReqId id;
+} SharedLdResp deriving(Bits, Eq, FShow);
+
 // Boot rom: each block is 64-bit data
 typedef `LOG_BOOT_ROM_BYTES LgBootRomBytes;
 typedef TSub#(LgBootRomBytes, TLog#(NumBytes)) LgBootRomSzData;

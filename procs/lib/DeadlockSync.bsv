@@ -98,7 +98,7 @@ instance Connectable#(DeadlockIndInv, DeadlockIndication);
                 tagged Child ._i: return CoherentChild;
                 tagged Dma .dmaId: return (case(dmaId) matches
                     tagged MemLoader ._i: return HostDma;
-                    tagged Tlb ._i: return TlbDma;
+                    tagged CoreDma ._i: return TlbDma;
                 endcase);
             endcase);
 `ifdef SELF_INV_CACHE

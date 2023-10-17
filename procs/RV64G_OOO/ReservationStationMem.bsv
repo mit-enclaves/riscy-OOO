@@ -134,8 +134,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits   <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready  <- replicateM(mkEhr(?));
 `ifdef SECURITY
-    Vector#(size, Ehr#(2,Bool))                        to_dispatch <- replicateM(mkEhr(?));
-    Vector#(size, Ehr#(3, RedispatchStatus))                     redispatch  <- replicateM(mkEhr(NoRedispatch));
+    Vector#(size, Ehr#(2,Bool))                      to_dispatch <- replicateM(mkEhr(?));
+    Vector#(size, Ehr#(3, RedispatchStatus))         redispatch  <- replicateM(mkEhr(NoRedispatch));
 `ifdef ENCLAVE_DEBUG
     Reg#(Bit#(32)) cycleCounter <- mkReg(0);
 `endif
@@ -321,7 +321,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
 `ifdef SECURITY
     method ActionValue#(ToReservationStationMemSec#(a, size)) dispatchData if (can_schedule_index matches tagged Valid .i);
     	to_dispatch[i][0] <= False;
-	redispatch[i][2] <= NoRedispatch;
+        redispatch[i][2] <= NoRedispatch;
         return ToReservationStationMemSec{
             data: data[i],
             regs: regs[i],
@@ -334,7 +334,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
                 src3: True,
                 dst: True
             },
-	    rsIdx: i
+            rsIdx: i
         };
     endmethod
 

@@ -39,47 +39,81 @@ import MemLoader::*;
 
 typedef struct {
     CoreId core;
-    TlbMemReqId id;
+    DmaMemReqId id;
     LineDataOffset dataSel;
-} TlbDmaReqId deriving(Bits, Eq, FShow);
+} CoreDmaReqId deriving(Bits, Eq, FShow);
 
 typedef union tagged {
     MemLoaderMemReqId MemLoader;
-    TlbDmaReqId Tlb;
+    CoreDmaReqId CoreDma;
 } LLCDmaReqId deriving(Bits, Eq, FShow);
 
 module mkLLCDmaConnect#(
     DmaServer#(LLCDmaReqId) llc,
     MemLoaderMemClient memLoader,
-    Vector#(CoreNum, TlbMemClient) tlb
+    Vector#(CoreNum, DmaMemClient) coreDma
 )(Empty) provisos (
     Alias#(dmaRqT, DmaRq#(LLCDmaReqId))
 );
     Bool verbose = True;
 
     // helper functions for cross bar
-    function XBarDstInfo#(Bit#(0), Tuple2#(CoreId, TlbMemReq)) getTlbDst(CoreId core, TlbMemReq r);
+    function XBarDstInfo#(Bit#(0), Tuple2#(CoreId, DmaMemReq)) getDmaDst(CoreId core, DmaMemReq r);
         return XBarDstInfo {idx: 0, data: tuple2(core, r)};
     endfunction
-    function Get#(TlbMemReq) tlbReqGet(TlbMemClient cli) = toGet(cli.memReq);
+    function Get#(DmaMemReq) dmaReqGet(DmaMemClient cli) = toGet(cli.memReq);
 
-    // cross bar for Tlb
-    FIFO#(Tuple2#(CoreId, TlbMemReq)) tlbQ <- mkFIFO;
-    mkXBar(getTlbDst, map(tlbReqGet, tlb), vec(toPut(tlbQ)));
+    // cross bar for CoreDma
+    FIFO#(Tuple2#(CoreId, DmaMemReq)) coreDmaQ <- mkFIFO;
+    mkXBar(getDmaDst, map(dmaReqGet, coreDma), vec(toPut(coreDmaQ)));
 
-    // TLB req is for a whole data
-    function dmaRqT getTlbDmaReq(CoreId c, TlbMemReq r);
-        LineDataOffset dataSel = getLineDataOffset(r.addr);
-        let id = TlbDmaReqId {
+    function LineByteEn liftWordToLineByteEn(ByteEn be, LineDataOffset offset);
+    // TODO check, potential mistake
+        Bit#(TLog#(CacheLineSz)) newoffset = zeroExtend(offset) << 3; // sizeof(LineDataOffset) + 3
+        LineByteEn res = replicate(False);
+        for(Integer i = 0; i < valueof(NumBytes); i = i + 1) begin
+            res[newoffset + fromInteger(i)] = be[i];
+        end
+        return res;
+    endfunction
+    
+    function Line liftWordToLine(Data data, LineDataOffset offset);
+        Line res = replicate(0);
+        res[offset] = data;
+        return res;
+    endfunction
+
+    // CoreDMA req is for a whole data
+    function dmaRqT getCoreDmaReq(CoreId c, DmaMemReq r);
+        LineDataOffset dataSel = ?;
+        DmaMemReqId idx = ?;
+        Addr addr = ?;
+        LineByteEn byteEn = ?;
+        Line data = ?;
+        if(r matches tagged Tlb .req) begin
+            dataSel = getLineDataOffset(req.addr);
+            idx = Tlb (req.id);
+            addr = req.addr;
+            byteEn = replicate(False); // tlb req is always load
+            data = ?;    
+        end else if(r matches tagged ShrMem .req) begin
+            dataSel = getLineDataOffset(req.addr);
+            idx = ShrMem (req.id);
+            addr = req.addr;
+            byteEn = liftWordToLineByteEn(req.byteEn, dataSel); // secure shared memory can be store
+            data = liftWordToLine(req.data, dataSel);    
+        end
+        
+        let id = CoreDmaReqId {
             core: c,
-            id: r.id,
+            id: idx,
             dataSel: dataSel
         };
         return DmaRq {
-            addr: r.addr,
-            byteEn: replicate(False), // tlb req is always load
-            data: ?,
-            id: Tlb (id)
+            addr: addr,
+            byteEn: byteEn,
+            data: data,
+            id: CoreDma (id)
         };
     endfunction
 
@@ -100,13 +134,13 @@ module mkLLCDmaConnect#(
         end
     endrule
 
-    (* descending_urgency = "sendMemLoaderReqToLLC, sendTlbReqToLLC" *)
-    rule sendTlbReqToLLC;
-        let {c, r} <- toGet(tlbQ).get;
-        let req = getTlbDmaReq(c, r);
+    (* descending_urgency = "sendMemLoaderReqToLLC, sendCoreDmaReqToLLC" *)
+    rule sendCoreDmaReqToLLC;
+        let {c, r} <- toGet(coreDmaQ).get;
+        let req = getCoreDmaReq(c, r);
         llc.memReq.enq(req);
         if(verbose) begin
-            $display("  [LLCDmaConnnect sendTlbReqToLLC] ", fshow(r), " ; ", fshow(req));
+            $display("  [LLCDmaConnnect sendCoreDmaReqToLLC] ", fshow(r), " ; ", fshow(req));
         end
     endrule
 
@@ -120,16 +154,27 @@ module mkLLCDmaConnect#(
         doAssert(False, "No mem loader ld");
     endrule
 
-    rule sendLdRespToTlb(llc.respLd.first.id matches tagged Tlb .id);
+    rule sendLdRespToCoreDma(llc.respLd.first.id matches tagged CoreDma .id);
         llc.respLd.deq;
         let resp = llc.respLd.first;
-        let ld = TlbLdResp {
-            data: resp.data[id.dataSel],
-            id: id.id
-        };
-        tlb[id.core].respLd.enq(ld);
-        if(verbose) begin
-            $display("  [LLCDmaConnect sendLdRespToTlb] ", fshow(resp), " ; ", fshow(ld));
+        if(id.id matches tagged Tlb .idx) begin
+            let ld = TlbLdResp {
+                data: resp.data[id.dataSel],
+                id: idx
+            };
+            coreDma[id.core].respLd.enq(Tlb (ld));
+            if(verbose) begin
+                $display("  [LLCDmaConnect sendLdRespToCoreDma] ", fshow(resp), " ; ", fshow(ld));
+            end
+        end else if (id.id matches tagged ShrMem .idx) begin
+            let ld = SharedLdResp {
+                data: resp.data[id.dataSel],
+                id: idx
+            };
+            coreDma[id.core].respLd.enq(ShrMem (ld));
+            if(verbose) begin
+                $display("  [LLCDmaConnect sendLdRespToCoreDma] ", fshow(resp), " ; ", fshow(ld));
+            end
         end
     endrule
 
@@ -143,11 +188,11 @@ module mkLLCDmaConnect#(
         end
     endrule
 
-    rule sendStRespToTlb(llc.respSt.first matches tagged Tlb .id);
+    rule sendStRespToCoreDma(llc.respSt.first matches tagged CoreDma .id);
         llc.respSt.deq;
         if(verbose) begin
-            $display("  [LLCDmaConnect sendStRespToTlb] ", fshow(llc.respSt.first));
+            $display("  [LLCDmaConnect sendStRespToCoreDma] ", fshow(llc.respSt.first));
         end
-        doAssert(False, "No TLB st");
+        // Nothing to do here
     endrule
 endmodule

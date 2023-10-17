@@ -408,7 +408,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         // does not include prv info, and it has to flush when prv changes.
         // XXX As approximation, Trap may cause context switch, so flush for
         // security
-        //makeSystemConsistent(False, True, False);
+        makeSystemConsistent(False, False, False);
     endrule
 
     // commit misspeculated load
