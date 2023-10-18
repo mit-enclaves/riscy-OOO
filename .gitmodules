@@ -18,7 +18,7 @@
 	url = https://github.com/riscv/riscv-gnu-toolchain.git
 [submodule "coherence"]
 	path = coherence
-	url = git@github.mit.edu:mgomez12/coherence.git
+	url = git@github.com:mit-enclaves/coherence.git
 [submodule "fpgautils"]
 	path = fpgautils
 	url = https://github.com/csail-csg/fpgautils.git
