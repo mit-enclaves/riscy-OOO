@@ -38,10 +38,18 @@ typedef struct {
 } TranslationCacheResp deriving(Bits, Eq, FShow);
 
 interface TranslationCache;
+`ifdef SECURITY
+    method Action req(Vpn vpn, Asid asid, Sdid sdid);
+`else
     method Action req(Vpn vpn, Asid asid);
+`endif
     method TranslationCacheResp resp;
     method Action deqResp;
+`ifdef SECURITY
+    method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid, Sdid sdid);
+`else
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid);
+`endif
     method Action flush;
     method Bool flush_done;
 endinterface
@@ -55,8 +63,13 @@ endinterface
 
 // translation cache for a specific level L. This stores the PTEs at level L.
 interface SingleSplitTransCache;
+`ifdef SECURITY
+    method ActionValue#(Maybe#(Ppn)) req(Vpn vpn, Asid asid, Sdid sdid);
+    method Action addEntry(Vpn vpn, Ppn ppn, Asid asid, Sdid sdid);
+`else
     method ActionValue#(Maybe#(Ppn)) req(Vpn vpn, Asid asid);
     method Action addEntry(Vpn vpn, Ppn ppn, Asid asid);
+`endif
     method Action flush;
 endinterface
 
@@ -70,6 +83,9 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
     Vector#(SplitTransCacheSize, Reg#(Vpn)) vpnVec <- replicateM(mkRegU);
     Vector#(SplitTransCacheSize, Reg#(Ppn)) ppnVec <- replicateM(mkRegU);
     Vector#(SplitTransCacheSize, Reg#(Asid)) asidVec <- replicateM(mkRegU);
+`ifdef SECURITY
+    Vector#(SplitTransCacheSize, Reg#(Sdid)) sdidVec <- replicateM(mkRegU);
+`endif
 
     // bit-LRU replacement. To reduce cycle time, we update LRU bits in the
     // next cycle after we touch an entry. However, when we have two
@@ -105,11 +121,20 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
         lruBit_upd <= val;
     endrule
 
+`ifdef SECURITY
+    method ActionValue#(Maybe#(Ppn)) req(Vpn vpn, Asid asid, Sdid sdid) if(updRepIdx_enq == Invalid && !flushEn);
+`else
     method ActionValue#(Maybe#(Ppn)) req(Vpn vpn, Asid asid) if(updRepIdx_enq == Invalid && !flushEn);
+`endif
         function Bool hit(SplitTransCacheIdx i);
             Bool vpn_match = getMaskedVpn(vpn, level) == getMaskedVpn(vpnVec[i], level);
             Bool asid_match = asid == asidVec[i]; // TODO global??
+`ifdef SECURITY
+            Bool sdid_match = sdid == sdidVec[i];
+            return validVec[i] && vpn_match && asid_match && sdid_match;
+`else
             return validVec[i] && vpn_match && asid_match;
+`endif
         endfunction
         Vector#(SplitTransCacheSize, SplitTransCacheIdx) idxVec = genWith(fromInteger);
         if(find(hit, idxVec) matches tagged Valid .i) begin
@@ -121,13 +146,22 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
         end
     endmethod
         
+`ifdef SECURITY
+    method Action addEntry(Vpn vpn, Ppn ppn, Asid asid, Sdid sdid) if(updRepIdx_enq == Invalid && !flushEn);
+`else
     method Action addEntry(Vpn vpn, Ppn ppn, Asid asid) if(updRepIdx_enq == Invalid && !flushEn);
+`endif
         // only update LRU if the new entry already exists (TODO Maybe this is
         // not needed after we detect duplicate pagewalk mem req)
         function Bool sameEntry(SplitTransCacheIdx i);
             Bool vpn_match = getMaskedVpn(vpn, level) == getMaskedVpn(vpnVec[i], level);
             Bool asid_match = asid == asidVec[i]; // TODO global??
+`ifdef SECURITY
+            Bool sdid_match = sdid == sdidVec[i];
+            return validVec[i] && vpn_match && asid_match && sdid_match;
+`else
             return validVec[i] && vpn_match && asid_match;
+`endif
         endfunction
         Vector#(SplitTransCacheSize, SplitTransCacheIdx) idxVec = genWith(fromInteger);
         if(find(sameEntry, idxVec) matches tagged Valid .idx) begin
@@ -160,6 +194,9 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
             vpnVec[addIdx] <= vpn; // we mask vpn at search time
             ppnVec[addIdx] <= ppn; // don't mask ppn, intermidate PTE point to a 4KB page
             asidVec[addIdx] <= asid;
+`ifdef SECURITY
+            sdidVec[addIdx] <= sdid;
+`endif
             // update LRU bits
             updRepIdx_enq <= Valid (addIdx);
         end
@@ -184,11 +221,19 @@ module mkSplitTransCache(TranslationCache);
 
     Fifo#(1, TranslationCacheResp) respQ <- mkPipelineFifo;
 
+`ifdef SECURITY
+    method Action req(Vpn vpn, Asid asid, Sdid sdid);
+`else
     method Action req(Vpn vpn, Asid asid);
+`endif
         TranslationCacheResp resp;
         Vector#(TSub#(NumPageWalkLevels, 1), Maybe#(Ppn)) hits;
         for(PageWalkLevel i = 0; i < maxPageWalkLevel; i = i+1) begin
+`ifdef SECURITY
+            hits[i] <- caches[i].req(vpn, asid, sdid); // cached page walk level i+1
+`else
             hits[i] <- caches[i].req(vpn, asid); // cached page walk level i+1
+`endif
         end
         // XXX hit in lower level has priority
         if(findIndex(isValid, hits) matches tagged Valid .idx) begin
@@ -216,10 +261,18 @@ module mkSplitTransCache(TranslationCache);
     // newly add entry (so in case of miss, the pending req could mark itself
     // waiting on the page walk that is just about to addEntry, and get the
     // bypass)
+`ifdef SECURITY
+    method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid, Sdid sdid) if(respQ.notFull);
+`else
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid) if(respQ.notFull);
+`endif
         doAssert(level > 0, "cannot be level 0");
         doAssert(level <= maxPageWalkLevel, "level too large");
+`ifdef SECURITY
+        caches[level - 1].addEntry(vpn, ppn, asid, sdid);
+`else
         caches[level - 1].addEntry(vpn, ppn, asid);
+`endif
     endmethod
         
     method Action flush;
@@ -235,7 +288,11 @@ endmodule
 module mkNullTransCache(TranslationCache);
     Fifo#(1, void) reqQ <- mkPipelineFifo;
 
+`ifdef SECURITY
+    method Action req(Vpn vpn, Asid asid, Sdid sdid);
+`else
     method Action req(Vpn vpn, Asid asid);
+`endif
         reqQ.enq(?);
     endmethod
     method Action deqResp;
@@ -247,7 +304,11 @@ module mkNullTransCache(TranslationCache);
             ppn: ?
         };
     endmethod
+`ifdef SECURITY
+    method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid, Sdid sdid);
+`else
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid);
+`endif
         noAction;
     endmethod
     method Action flush;
