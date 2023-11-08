@@ -401,7 +401,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         else begin
 `ifdef SECURITY
             PageOffset rightZeroes = 0;
-            Sdid isEnclave = (zeroExtend({cRq.vpn, rightZeroes}) & vm_info.sanctum_evmask) == vm_info.sanctum_evbase;
+            Sdid isEnclave = pack((zeroExtend({cRq.vpn, rightZeroes}) & vm_info.sanctum_evmask) == vm_info.sanctum_evbase);
 `endif
             // miss, deq resp
             tlb4KB.deqResp(Invalid);
@@ -634,8 +634,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                     end
                     // add to translation cache
 `ifdef SECURITY
-                    Sdid isEnclave = pendEnclave[idx];
-                    transCache.addEntry(cRq.vpn, walkLevel, pte.ppn, vm_info.asid, isEnclave);
+                    transCache.addEntry(cRq.vpn, walkLevel, pte.ppn, vm_info.asid, pack(pendEnclave[idx]));
 `else
                     transCache.addEntry(cRq.vpn, walkLevel, pte.ppn, vm_info.asid);
 `endif
