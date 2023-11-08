@@ -36,6 +36,11 @@ typedef Bit#(InstSz) Instruction;
 typedef 0 AsidSz; // not really implement ASID
 typedef Bit#(AsidSz) Asid;
 
+`ifdef SECURITY
+typedef 1 SdidSz;
+typedef Bit#(SdidSz) Sdid;
+`endif
+
 typedef TDiv#(DataSz, 8) NumBytes;
 typedef TLog#(NumBytes) IndxShamt;
 typedef Vector#(NumBytes, Bool) ByteEn;
