@@ -153,7 +153,7 @@ interface MemExeInput;
     method Action rob_setExecuted_deqLSQ(InstTag t, Maybe#(Exception) cause, Maybe#(LdKilledBy) ld_killed);
 `ifdef SECURITY
     method InstTag rob_top_tag;
-    method Bool isPrvM
+    method Bool isPrvM;
 `endif
     // MMIO
     method Bool isMMIOAddr(Addr a);
@@ -489,7 +489,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 `ifdef SECURITY
     function Bool is_trusted_memory(Addr vaddr);
-        return (inIfc.isPrvM || vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
+        return inIfc.isPrvM || (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
     endfunction
     
     function Bool should_begin_translation(MemRegReadToExe x);
