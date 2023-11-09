@@ -386,6 +386,9 @@ module mkCore#(CoreId coreId)(Core);
             method rob_setExecuted_doFinishMem = rob.setExecuted_doFinishMem;
 `ifdef SECURITY
             method rob_top_tag = rob.deqPort[0].getDeqInstTag;
+            method Bool isPrvM;
+                return csrf.decodeInfo.prv == prvM;
+            endmethod
 `endif
             method rob_setExecuted_deqLSQ = rob.setExecuted_deqLSQ;
             method isMMIOAddr = mmio.isMMIOAddr;

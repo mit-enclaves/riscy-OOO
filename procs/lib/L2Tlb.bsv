@@ -414,10 +414,18 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             tlb4KB.deqResp(Valid (resp4KB.way));
         end
         else begin
+`ifdef SECURITY
+            PageOffset rightZeroes = 0;
+            Sdid isEnclave = pack((zeroExtend({cRq.vpn, rightZeroes}) & vm_info.sanctum_evmask) == vm_info.sanctum_evbase);
+`endif
             // miss, deq resp
             tlb4KB.deqResp(Invalid);
             // check translation cache
+`ifdef SECURITY
+            transCache.req(cRq.vpn, vm_info.asid, isEnclave); // isEnclave determine the security domain
+`else
             transCache.req(cRq.vpn, vm_info.asid);
+`endif
             transCacheReqQ.enq(idx);
             // perf: TLB miss
 `ifdef PERF_COUNT
@@ -640,7 +648,11 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                         pendWait_pageWalk[idx] <= WaitMem;
                     end
                     // add to translation cache
+`ifdef SECURITY
+                    transCache.addEntry(cRq.vpn, walkLevel, pte.ppn, vm_info.asid, pack(pendEnclave[idx]));
+`else
                     transCache.addEntry(cRq.vpn, walkLevel, pte.ppn, vm_info.asid);
+`endif
                 end
             end
             else begin
