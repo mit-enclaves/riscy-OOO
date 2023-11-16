@@ -42,6 +42,8 @@ typedef Bit#(TLog#(DTlbReqNum)) DTlbReqIdx;
 typedef `L2TLB_REQ_NUM L2TlbReqNum;
 typedef Bit#(TLog#(L2TlbReqNum)) L2TlbReqIdx;
 
+typedef `LOG_DRAM_MAX LgDramMax;
+
 // Only for Sv39
 typedef 27 VpnSz;
 typedef Bit#(VpnSz) Vpn;
@@ -105,8 +107,8 @@ function Bool outOfProtectionDomain(VMInfo vm_info, Addr vaddr);
 endfunction
 
 function Bool isHigherThanDRAM(Addr addr);
-    Addr mask = (1 << LOG_DRAM_MAX) - 1;
-    return ((addr & mask) != 0)
+    Addr mask = (1 << valueof(LgDramMax)) - 1;
+    return ((addr & mask) != 0);
 endfunction
 
 // get the bitmask for accessed DRAM regions

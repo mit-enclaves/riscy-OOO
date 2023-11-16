@@ -489,8 +489,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 `ifdef SECURITY
     function Bool is_trusted_memory(Addr vaddr);
-        Bool UseL1 = (inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoUseL1)) == 0; 
-        return (inIfc.isPrvM && UseL1) || (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
+        Bool useL1 = (inIfc.csrf_rd(CSRmspec) & zeroExtend(mSpecNoUseL1)) == 0; 
+        return (inIfc.isPrvM && useL1) || (vaddr & inIfc.csrf_rd(CSRmevmask)) == inIfc.csrf_rd(CSRmevbase) || (inIfc.csrf_rd(CSRmevmask) == 0);
     endfunction
     
     function Bool should_begin_translation(MemRegReadToExe x);
