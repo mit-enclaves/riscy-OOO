@@ -84,6 +84,7 @@
 `define LOG_DRAM_REGION_NUM 6 // 64 DRAM regions
 `define LOG_DRAM_REGION_SIZE 25 // 32MB for each DRAM region
 `define SIM_LLC_ARBITER_NUM 2
+`define LOG_DRAM_MAX 32
 `endif
 
 //

@@ -333,6 +333,7 @@ Bit#(2) mSpecNonMem = 1; // only non-memory inst can speculate
 Bit#(2) mSpecNone   = 3; // no inst can speculate
 Bit#(3) mSpecNoTrainBranchPred = 4;
 Bit#(4) mSpecNoUseBranchPred = 8;
+Bit#(5) mSpecNoUseL1 = 16;
 
 typedef enum {
     Unsupported,

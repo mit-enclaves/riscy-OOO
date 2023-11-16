@@ -566,6 +566,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             // req is done
             pendValid_pageWalk[idx] <= False;
             pendWait_pageWalk[idx] <= None;
+            if(verbose) begin
+            $display("[L2TLB]: PageFault", fshow(reason));
+            end
 `ifdef PERF_COUNT
             // incr miss latency
             incrMissLat(cRq.child, idx);
@@ -615,6 +618,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         else if((newPTBase & parmask) == parbase) begin
             // access falls into protected address range (that I don't have permission) -> fault
             pageFault("SANCTUM protected address range");
+        end
+        else if(isHigherThanDRAM(newPTBase)) begin
+            pageFault("SANCTUM address is higher than DRAM");
         end
         else if((getAddrRegions(newPTBase, leafPTE, walkLevel) & mrbm) != (getAddrRegions(newPTBase, leafPTE, walkLevel))) begin
             // access falls outiside regions belong to me -> fault

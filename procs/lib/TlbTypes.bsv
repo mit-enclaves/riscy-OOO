@@ -104,6 +104,11 @@ function Bool outOfProtectionDomain(VMInfo vm_info, Addr vaddr);
     else return ((vaddr & vm_info.sanctum_evmask) != vm_info.sanctum_evbase );
 endfunction
 
+function Bool isHigherThanDRAM(Addr addr);
+    Addr mask = (1 << LOG_DRAM_MAX) - 1;
+    return ((addr & mask) != 0)
+endfunction
+
 // get the bitmask for accessed DRAM regions
 // FIXME This code assumes 64 x 32MB regions
 function Addr getAddrRegions(Addr addr, Bool isLeaf, PageWalkLevel level) provisos (
