@@ -42,6 +42,8 @@ typedef Bit#(TLog#(DTlbReqNum)) DTlbReqIdx;
 typedef `L2TLB_REQ_NUM L2TlbReqNum;
 typedef Bit#(TLog#(L2TlbReqNum)) L2TlbReqIdx;
 
+typedef `LOG_DRAM_MAX LgDramMax;
+
 // Only for Sv39
 typedef 27 VpnSz;
 typedef Bit#(VpnSz) Vpn;
@@ -102,6 +104,11 @@ function Bool outOfProtectionDomain(VMInfo vm_info, Addr vaddr);
     // If it is protected, then the size of the protection domain is a power of
     // 2 starting at sanctum_evbase
     else return ((vaddr & vm_info.sanctum_evmask) != vm_info.sanctum_evbase );
+endfunction
+
+function Bool isHigherThanDRAM(Addr addr);
+    Addr mask = (1 << valueof(LgDramMax)) - 1;
+    return ((addr & mask) != 0);
 endfunction
 
 // get the bitmask for accessed DRAM regions

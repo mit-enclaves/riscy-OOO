@@ -1,0 +1,8 @@
+bscExtraArgs: []
+bscUserDirs:
+- "."
+- "coherence/src"
+- "connectal/bsv"
+- "fpgautils/lib"
+- "procs/RV64G_OOO" 
+- "procs/lib" 
