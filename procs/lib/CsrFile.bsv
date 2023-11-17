@@ -524,8 +524,11 @@ module mkCsrFile#(Data hartid)(CsrFile);
     Reg#(Data) meparmask_csr <- mkCsrReg(0);
 
     // ### Turn on/off speculation
-    Reg#(Bit#(2)) mspec_reg <- mkCsrReg(mSpecAll);
+    Reg#(Bit#(5)) mspec_reg <- mkCsrReg(0);
     Reg#(Data) mspec_csr = zeroExtendReg(mspec_reg);
+
+    Reg#(Data) sspec_csr = zeroExtendReg(mspec_reg);
+    Reg#(Data) spec_csr  = zeroExtendReg(mspec_reg);
 
     // sanctum user CSR
     // ### true random number
@@ -549,6 +552,7 @@ module mkCsrFile#(Data hartid)(CsrFile);
             CSRinstret:    instret_csr;
             CSRterminate:  terminate_csr;
             CSRstats:      stats_csr;
+            CSRspec:       spec_csr;
             // Supervisor CSRs
             CSRsstatus:    sstatus_csr;
             CSRsie:        sie_csr;
@@ -560,6 +564,7 @@ module mkCsrFile#(Data hartid)(CsrFile);
             CSRstval:      stval_csr;
             CSRsip:        sip_csr;
             CSRsatp:       satp_csr;
+            CSRsspec:      sspec_csr;
             // Machine CSRs
             CSRmstatus:    mstatus_csr;
             CSRmisa:       misa_csr;

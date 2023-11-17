@@ -262,9 +262,12 @@ typedef enum {
     CSRmeparbase  = 12'h7c7,
     CSRmeparmask  = 12'h7c8,
     CSRmflush     = 12'h7c9, // flush pipeline + cache
-    CSRmspec      = 12'h7ca, // control speculation
+    CSRmspec      = 12'h7ca, // Control Speculation
+    // sanctum supervisor CSR
+    CSRsspec       = 12'h190, // Controls Speculation
     // sanctum user CSR
     CSRtrng       = 12'hcc0, // random number for secure boot
+    CSRspec       = 12'h802, // Controls Speculation
 `endif
     // CSR that catches all the unimplemented CSRs. To avoid exception on this,
     // make it a user non-standard read/write CSR.
@@ -321,6 +324,8 @@ function CSR unpackCSR(Bit#(12) x);
         pack(CSR'(CSRmeparmask )): (CSRmeparmask );
         pack(CSR'(CSRmflush    )): (CSRmflush    );
         pack(CSR'(CSRmspec     )): (CSRmspec     );
+        pack(CSR'(CSRsspec     )): (CSRsspec     );
+        pack(CSR'(CSRspec      )): (CSRspec      );
         pack(CSR'(CSRtrng      )): (CSRtrng      );
 `endif
         default                  : (CSRnone      );
@@ -328,7 +333,6 @@ function CSR unpackCSR(Bit#(12) x);
 endfunction
 
 // values for CSRmspec
-Bit#(2) mSpecAll    = 0; // every inst can speculate
 Bit#(2) mSpecNonMem = 1; // only non-memory inst can speculate
 Bit#(2) mSpecNone   = 3; // no inst can speculate
 Bit#(3) mSpecNoTrainBranchPred = 4;
