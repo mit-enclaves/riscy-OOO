@@ -567,7 +567,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             pendValid_pageWalk[idx] <= False;
             pendWait_pageWalk[idx] <= None;
             if(verbose) begin
-            $display("[L2TLB]: PageFault", fshow(reason));
+            $display("[L2TLB]: PageFault ", fshow(reason));
             end
 `ifdef PERF_COUNT
             // incr miss latency
