@@ -107,7 +107,7 @@ function Bool outOfProtectionDomain(VMInfo vm_info, Addr vaddr);
 endfunction
 
 function Bool isHigherThanDRAM(Addr addr);
-    Addr mask = (1 << valueof(LgDramMax)) - 1;
+    Addr mask = ~((1 << valueof(LgDramMax)) - 1);
     return ((addr & mask) != 0);
 endfunction
 
