@@ -34,6 +34,9 @@ bscUserDirs:
 - "."
 - "coherence/src"
 - "connectal/bsv"
+- "connectal/lib/bsv"
 - "fpgautils/lib"
-- "procs/RV64G_OOO" 
-- "procs/lib" 
+- "procs/RV64G_OOO"
+- "procs/lib"
+- "procs/build/RV64G_OOO.core_1.core_SMALL.cache_LARGE.weak.l1_cache_lru.check_deadlock/verilator/generatedbsv"
+
