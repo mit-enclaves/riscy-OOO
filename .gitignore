@@ -1,0 +1,7 @@
+.bsclsp
+.vscode
+
+*.swp
+*.out
+*.txt
+*.log

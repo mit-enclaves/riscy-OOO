@@ -38,5 +38,5 @@ bscUserDirs:
 - "fpgautils/lib"
 - "procs/RV64G_OOO"
 - "procs/lib"
-- "procs/build/RV64G_OOO.core_1.core_SMALL.cache_LARGE.weak.l1_cache_lru.check_deadlock/verilator/generatedbsv"
+- "procs/build/RV64G_OOO.core_2.core_SMALL.cache_LARGE.tso.l1_cache_lru.secure_flush.check_deadlock/verilator/generatedbsv"
 

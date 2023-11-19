@@ -33,6 +33,7 @@ import CacheUtils::*;
 import Amo::*;
 import BootRom::*;
 import MemLoader::*;
+import LLCache::*;
 
 // MMIO logic at platform (MMIOPlatform)
 // XXX Currently all MMIO requests and posts of timer interrupts are handled
@@ -64,10 +65,12 @@ typedef union tagged {
     void MTime;
     void ToHost;
     void FromHost;
+    void LLCPartitionCtrl;
 } MMIOPlatformReq deriving(Bits, Eq, FShow);
 
 module mkMMIOPlatform#(
     BootRomMMIO bootRom, MemLoaderMMIO memLoader,
+    LLCPtControl#(LLIndexSz) llcCtrl,
     Vector#(CoreNum, MMIOCoreToPlatform) cores
 )(MMIOPlatform) provisos(
     Bits#(Data, 64) // this module assumes Data is 64-bit wide
@@ -223,6 +226,9 @@ module mkMMIOPlatform#(
                 else if(addr == fromHostAddr) begin
                     // assume fromhost is of size Data
                     newReq = FromHost;
+                end
+                else if(addr == lccPartitionCtrlAddr) begin
+                    newReq = LLCPartitionCtrl;
                 end
                 curReq <= newReq;
 
@@ -830,6 +836,34 @@ module mkMMIOPlatform#(
             cores[reqCore].pRs.enq(DataAccess (resp));
             if(verbose) begin
                 $display("[Platform - process fromhost] resp ", fshow(resp));
+            end
+        end
+    endrule
+
+    rule processLLCPartitionCtrl(
+        curReq matches tagged LLCPartitionCtrl &&&
+        state == ProcessReq &&& !isInstFetch
+    );
+        if(reqFunc == St) begin
+            MMIOLLCCtrlReq#(LLIndexSz) casted = unpack(truncate(reqData));
+            llcCtrl.changePartitioning(casted);
+            state <= SelectReq;
+            cores[reqCore].pRs.enq(DataAccess (MMIODataPRs {
+                valid: True, data: ?
+            }));
+            if(verbose) begin
+                $display("[Platform - process LLC Partition Ctrl] command sent to LLC controller",
+                fshow(reqData), "; ", fshow(casted));
+            end
+        end
+        else begin
+            // LLC Controller is write access only, access fault
+            state <= SelectReq;
+            cores[reqCore].pRs.enq(DataAccess (MMIODataPRs {
+                valid: False, data: ?
+            }));
+            if(verbose) begin
+                $display("[Platform - process LLC Partition Ctrl] invalid request");
             end
         end
     endrule

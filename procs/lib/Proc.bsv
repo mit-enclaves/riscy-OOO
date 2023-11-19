@@ -87,7 +87,6 @@ module mkProc#(Clock portalClk, Reset portalRst)(Proc);
     for(Integer i = 0; i < valueof(CoreNum); i = i+1) begin
         mmioToP[i] = core[i].mmioToPlatform;
     end
-    MMIOPlatform mmioPlatform <- mkMMIOPlatform(bootRom.mmio, memLoader.mmio, mmioToP);
 
     // last level cache
     LLCache llc <- mkLLCache;
@@ -110,6 +109,7 @@ module mkProc#(Clock portalClk, Reset portalRst)(Proc);
     // interface LLC to DRAM and control DRAM latency
     DramLLC dramLLC <- mkDramLLC(llc.to_mem);
 
+    MMIOPlatform mmioPlatform <- mkMMIOPlatform(bootRom.mmio, memLoader.mmio, llc.llc_ctrl, mmioToP);
     // connect stats
     for(Integer i = 0; i < valueof(CoreNum); i = i+1) begin
         rule broadcastStats;
