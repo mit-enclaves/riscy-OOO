@@ -13,21 +13,19 @@ typedef 0 LgLLBankNum;
 typedef TSub#(LgLLLineNum, TAdd#(LgLLWayNum, LgLLBankNum)) LgLLSetNum;
 typedef LgLLSetNum LLIndexSz;
 
-typedef `LOG_DRAM_REGION_NUM LgDramRegionNum;
-typedef `LOG_DRAM_REGION_SIZE LgDramRegionSz;
 typedef TAdd#(TAdd#(LLIndexSz, LgLLBankNum), LgLineSzBytes) LLIndexBankOffsetSz;
 
 function Addr secureRotateAddr(Addr addr);
     // low bits: index + bank id + line offset without region
-    Bit#(TSub#(LLIndexBankOffsetSz, LgDramRegionNum)) low = truncate(addr);
+    Bit#(TSub#(LLIndexBankOffsetSz, LgLLCPartitionNum)) low = truncate(addr);
     // swap bits: to be swapped with dram region
-    Bit#(LgDramRegionNum) swap = truncate(addr >> (valueof(LLIndexBankOffsetSz) - valueof(LgDramRegionNum)));
+    Bit#(LgLLCPartitionNum) swap = truncate(addr >> (valueof(LLIndexBankOffsetSz) - valueof(LgLLCPartitionNum)));
     // middle bits between swap and region
     Bit#(TSub#(LgDramRegionSz, LLIndexBankOffsetSz)) mid = truncate(addr >> valueof(LLIndexBankOffsetSz));
     // dram region
-    Bit#(LgDramRegionNum) region = truncate(addr >> valueof(LgDramRegionSz));
+    Bit#(LgLLCPartitionNum) region = truncate(addr >> valueof(LgDramRegionSz));
     // high bits beyond phy mem boundary
-    Bit#(TSub#(AddrSz, TAdd#(LgDramRegionNum, LgDramRegionSz))) high = truncateLSB(addr);
+    Bit#(TSub#(AddrSz, TAdd#(LgLLCPartitionNum, LgDramRegionSz))) high = truncateLSB(addr);
     return {high, swap, mid, region, low};
 endfunction
 

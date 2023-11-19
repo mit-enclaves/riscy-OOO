@@ -163,12 +163,12 @@ typedef `SIM_LLC_ARBITER_LAT SimLLCArbLat;
 
 (* synthesize *)
 module mkLLPipeline(
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, LLIndexSz)
 ) provisos (
     Alias#(LLPipeIn#(LLChild, LLWay, LLCRqMshrIdx), pipeInT)
 );
     // pipeline
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx) m <- mkLLPipe;
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, LLIndexSz) m <- mkLLPipe;
 
 `ifdef BSIM
     // print the arbiter num
@@ -247,6 +247,7 @@ module mkLLPipeline(
     method first = m.first;
     method unguard_first = m.unguard_first;
     method deqWrite = m.deqWrite;
+    method changePartitioning = m.changePartitioning;
 endmodule
 
 `else // !USE_LLC_ARBITER_SECURE_MODEL
@@ -255,7 +256,7 @@ endmodule
 
 (* synthesize *)
 module mkLLPipeline(
-    SelfInvLLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
+    SelfInvLLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, indexSz)
 );
     let m <- mkSelfInvLLPipe;
     return m;
@@ -265,7 +266,7 @@ endmodule
 
 (* synthesize *)
 module mkLLPipeline(
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx, indexSz)
 );
     let m <- mkLLPipe;
     return m;
@@ -292,26 +293,8 @@ interface LLCache;
     interface Get#(LLCStuck) cRqStuck;
     // performance
     interface Perf#(LLCPerfType) perf;
+    interface LLCPtControl#(LLIndexSz) llc_ctrl;
 endinterface
-
-`ifdef SECURITY
-// We rotate the addr in/out LLC to achieve set partition
-// FIXME This is a hack: we simulate the performance of partitioning a large
-// LLC using a smaller LLC with less partitions. So LgLLCPartitionNum should
-// NOT be viewed as the number of DRAM regions.
-
-//typedef struct{Bit#(TLog#(LLIndexSz)) sizeR; Bit#(LLIndexSz) baseR} RegionL2 deriving(Bits, Eq, FShow);
-
-`ifdef SIM_LOG_LLC_PARTITION_NUM
-typedef `SIM_LOG_LLC_PARTITION_NUM LgLLCPartitionNum;
-`else
-typedef `LOG_DRAM_REGION_NUM LgLLCPartitionNum;
-`endif
-typedef `LOG_DRAM_REGION_SIZE LgDramRegionSz;
-typedef TExp#(LgLLCPartitionNum) DramRegionNum;
-typedef TAdd#(TAdd#(LLIndexSz, LgLLBankNum), LgLineSzBytes) LLIndexBankOffsetSz;
-typedef TAdd#(LgLLBankNum, LgLineSzBytes) LLBankOffsetSz;
-`endif // SECURITY
 
 (* synthesize *)
 module mkLLCache(LLCache);
@@ -320,15 +303,13 @@ module mkLLCache(LLCache);
 `endif
 
 `ifdef SECURITY
-    //Vector#(DramRegionNum, Reg#(RegionL2)) configRegionL2 <-replicateM(mkReg(0));
-
     function Addr secureRotateAddr(Addr addr) provisos(
         // region/partition id cannot be wider than index + bank id
         Add#(LgLLCPartitionNum, a__, TAdd#(LLIndexSz, LgLLBankNum))
     );
         // // Get the DRAM regionV
         // Bit#(LgLLCPartitionNum) region = truncate(addr >> valueof(LgDramRegionSz));
-        // let cR = configRegionL2[region];
+        // let cR = configRegionLLC[region];
         // let base = cR.baseR;
         // let log_size = cr.sizeR;
 
@@ -528,4 +509,6 @@ module mkLLCache(LLCache);
 `endif
         endmethod
     endinterface
+
+    interface LLCPtControl llc_ctrl= cache.llc_ctrl;
 endmodule
