@@ -424,7 +424,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
                             Bool src1_link = linkedR(regs.src1);
                             Addr push_addr = in.pc + 4;
                             Addr pop_addr = ras.ras[i].first;
-			    if (trainBranchPred && useBranchPred) begin
+			    // if (trainBranchPred && useBranchPred) begin
                                 if (dInst.iType == J && dst_link) begin
                                     // rs1 is invalid, i.e., not link: push
                                     ras.ras[i].popPush(False, Valid (push_addr));
@@ -452,7 +452,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
                                         end
                                     end
                                 end
-			    end
+			    // end
 
                             if(verbose) begin
                                 $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(in.pc), " ; ",
