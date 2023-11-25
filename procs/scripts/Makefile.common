@@ -95,6 +95,7 @@ CONNECTALFLAGS += --verilog $(XILINX_IP_DIR)/reset_regs --verilog $(XILINX_IP_DI
 CONNECTALFLAGS += --cflags=" -std=c++0x "
 CONNECTALFLAGS += --clibdir=$(RISCY_TOOLS)/lib --clib=fesvr
 CONNECTALFLAGS += -I$(RISCY_TOOLS)/include
+CONNECTALFLAGS += --awsflags="-clock_recipe_a A2"
 
 # device tree compiler: on AWS build machine (C4, centos) there is no dtc in
 # $PATH, so we allow user to specify the location of dtc on run machine (F1,
