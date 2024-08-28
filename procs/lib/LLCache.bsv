@@ -42,6 +42,7 @@ import SelfInvLLBank::*;
 import L1CoCache::*;
 import LLCDmaConnect::*;
 import Performance::*;
+import L2Tlb::*;
 
 // Last-Level
 
@@ -351,7 +352,19 @@ module mkLLCache(LLCache);
         else 
         return 0; // Memloader
     endfunction
-    LLBankWrapper cache <- mkLLBank(mkLastLvCRqMshr, mkLLPipeline, respLoadWithE, getTlbId);
+
+    function Bool isSharedMem(LLCDmaReqId dmaid);
+        case (dmaid) matches
+            tagged CoreDma .coreDmaReq:
+                case (coreDmaReq.id) matches
+                    tagged ShrMem ._: return True;
+                    default: return False;
+                endcase
+            default: return False;
+        endcase
+    endfunction
+
+    LLBankWrapper cache <- mkLLBank(mkLastLvCRqMshr, mkLLPipeline, respLoadWithE, getTlbId, isSharedMem);
 `endif // SELF_INV_CACHE
 
     // perf counters
