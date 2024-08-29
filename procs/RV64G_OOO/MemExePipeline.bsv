@@ -601,7 +601,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
        
 `ifdef SECURITY
         // check if addr is trusted (only valid in case of no page fault)
-        Bool trusted = is_trusted_memory(x.vaddr);
+        Bool trusted = True; //is_trusted_memory(x.vaddr);
 `endif // SECURITY
         
         // raise access fault in case of MMIO Lr/Sc
